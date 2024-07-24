@@ -1,6 +1,9 @@
 // self
 #include "window_wrapper.hpp"
 
+// c
+#include <math.h>
+
 
 
 WindowWrapper::WindowWrapper()
@@ -26,7 +29,7 @@ WindowWrapper::~WindowWrapper()
 }
 
 
-bool WindowWrapper::create_players(int ways, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context)
+bool WindowWrapper::create_players(int ways, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
 {
 	// validate parameter
 	PlayerWays player_ways = (PlayerWays)ways;
@@ -98,8 +101,14 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 
 			if (row_span > 0 && column_span > 0) {
 				QWidget *w = nullptr;
-				w = new QWidget();
-				m_index_to_widget.insert(std::make_pair(index, w));
+				auto iter = m_index_to_widget.find(index);
+				if (iter != m_index_to_widget.end()) {
+					w = iter->second;
+				}
+				else {
+					w = new QWidget();
+					m_index_to_widget.insert(std::make_pair(index, w));
+				}
 
 				m_grid_layout->addWidget(w, row_index, column_index, row_span, column_span);
 
@@ -111,7 +120,7 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 	}
 
 
-	return m_mpv_wrapper.create(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context);
+	return m_mpv_wrapper.start_players(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
 }
 
 
@@ -120,5 +129,5 @@ void WindowWrapper::destroy_players()
 	m_index_to_widget.clear();
 	m_layout_ways = PlayerWays::Zero;
 
-	m_mpv_wrapper.destroy();
+	m_mpv_wrapper.stop_players();
 }

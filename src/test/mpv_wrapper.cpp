@@ -104,7 +104,124 @@ MpvWrapper::~MpvWrapper()
 }
 
 
-bool MpvWrapper::create(std::map<int, QWidget *> &containers, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context)
+
+bool create_mpv_players(int index, QWidget *window, std::map<int, mpv_handle *> &index_to_mpv, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
+{
+	mpv_handle *mpv_context = mpv_create();
+	if (!mpv_context) {
+		SPDLOG_ERROR("mpv_create() error");
+		return false;
+	}
+
+	index_to_mpv.insert(std::make_pair(index, mpv_context));
+
+	int code = 0;
+
+	int64_t wid = (int64_t)window->winId();
+	code = mpv_set_option(mpv_context, "wid", MPV_FORMAT_INT64, &wid);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_set_option({}, wid, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), wid, code, mpv_error_string(code));
+		return false;
+	}
+
+	if (!profile.empty()) {
+		code = mpv_set_option_string(mpv_context, "profile", profile.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option({}, profile, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), profile, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!vo.empty()) {
+		code = mpv_set_option_string(mpv_context, "vo", vo.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option({}, vo, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), vo, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!hwdec.empty()) {
+		code = mpv_set_option_string(mpv_context, "hwdec", hwdec.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option({}, hwdec, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), hwdec, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!gpu_api.empty()) {
+		code = mpv_set_option_string(mpv_context, "gpu-api", gpu_api.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option({}, gpu-api, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), gpu_api, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!gpu_context.empty()) {
+		code = mpv_set_option_string(mpv_context, "gpu-context", gpu_context.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option({}, gpu-context, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), gpu_context, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!log_level.empty()) {
+		code = mpv_request_log_messages(mpv_context, log_level.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_request_log_messages({}, log_level) error, code: {}, msg: {}", fmt::ptr(mpv_context), log_level, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	if (!log_path.empty()) {
+		code = mpv_set_option_string(mpv_context, "log-file", QString::fromStdString(log_path).replace(".log", QString(".%1.log").arg(index)).toStdString().c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option_string({}, log-file, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), log_path, code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	code = mpv_initialize(mpv_context);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_initialize({}) error, code: {}, msg: {}", fmt::ptr(mpv_context), wid, code, mpv_error_string(code));
+		return false;
+	}
+
+	if (!QFile(QString::fromStdString(video_url)).exists()) {
+		// read from network
+		code = mpv_set_option_string(mpv_context, "stream-open-filename", video_url.c_str());
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_set_option_string({}, stream-open-filename, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), video_url, code, mpv_error_string(code));
+			return false;
+		}
+
+		code = mpv_command_string(mpv_context, "play");
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_command_string({}, play) error, code: {}, msg: {}", fmt::ptr(mpv_context), code, mpv_error_string(code));
+			return false;
+		}
+	}
+	else {
+		// read from file
+		auto url = new std::string(video_url);
+		code = mpv_stream_cb_add_ro(mpv_context, "myprotocol", (void *)url, open_fn);
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}", fmt::ptr(mpv_context), video_url, code, mpv_error_string(code));
+			return false;
+		}
+
+		const char *cmd[] = { "loadfile", "myprotocol://fake", NULL };
+		code = mpv_command(mpv_context, cmd);
+		if (code < 0) {
+			SPDLOG_ERROR("mpv_command({}, loadfile, myprotocol://fake) error, code: {}, msg: {}", fmt::ptr(mpv_context), code, mpv_error_string(code));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+bool MpvWrapper::start_players(std::map<int, QWidget *> &containers, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
 {
 	setlocale(LC_NUMERIC, "C");
 
@@ -112,134 +229,27 @@ bool MpvWrapper::create(std::map<int, QWidget *> &containers, std::string video_
 		return false;
 	}
 
-	bool has_error = false;
-	for (auto iter = containers.begin(); iter != containers.end() && !has_error; iter++) {
+	for (auto iter = containers.begin(); iter != containers.end(); iter++) {
 		int index = iter->first;
 		QWidget *w = iter->second;
-
-		mpv_handle *mpv_context = mpv_create();
-		if (!mpv_context) {
-			has_error = true;
-			SPDLOG_ERROR("mpv_create() error");
-			break;
-		}
-
-		m_index_to_mpv.insert(std::make_pair(index, mpv_context));
-
-		int code = 0;
-
-		int64_t wid = (int64_t)w->winId();
-		code = mpv_set_option(mpv_context, "wid", MPV_FORMAT_INT64, &wid);
-		if (code < 0) {
-			has_error = true;
-			SPDLOG_ERROR("mpv_set_option({}, wid, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), wid, code, mpv_error_string(code));
-			break;
-		}
-
-		if (!profile.empty()) {
-			code = mpv_set_option_string(mpv_context, "profile", profile.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option({}, profile, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), profile, code, mpv_error_string(code));
-				break;
-			}
-		}
-
-		if (!vo.empty()) {
-			code = mpv_set_option_string(mpv_context, "vo", vo.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option({}, vo, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), vo, code, mpv_error_string(code));
-				break;
-			}
-		}
-
-		if (!hwdec.empty()) {
-			code = mpv_set_option_string(mpv_context, "hwdec", hwdec.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option({}, hwdec, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), hwdec, code, mpv_error_string(code));
-				break;
-			}
-		}
-
-		if (!gpu_api.empty()) {
-			code = mpv_set_option_string(mpv_context, "gpu-api", gpu_api.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option({}, gpu-api, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), gpu_api, code, mpv_error_string(code));
-				break;
-			}
-		}
-
-		if (!gpu_context.empty()) {
-			code = mpv_set_option_string(mpv_context, "gpu-context", gpu_context.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option({}, gpu-context, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), gpu_context, code, mpv_error_string(code));
-				break;
-			}
-		}
-
-		code = mpv_initialize(mpv_context);
-		if (code < 0) {
-			has_error = true;
-			SPDLOG_ERROR("mpv_initialize({}) error, code: {}, msg: {}", fmt::ptr(mpv_context), wid, code, mpv_error_string(code));
-			break;
-		}
-
-		if (!QFile(QString::fromStdString(video_url)).exists()) {
-			// read from network
-			code = mpv_set_option_string(mpv_context, "stream-open-filename", video_url.c_str());
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_set_option_string({}, stream-open-filename, {}) error, code: {}, msg: {}", fmt::ptr(mpv_context), video_url, code, mpv_error_string(code));
-				break;
-			}
-
-			code = mpv_command_string(mpv_context, "play");
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_command_string({}, play) error, code: {}, msg: {}", fmt::ptr(mpv_context), code, mpv_error_string(code));
-				break;
-			}
-		}
-		else {
-			// read from file
-			auto url = new std::string(video_url);
-			code = mpv_stream_cb_add_ro(mpv_context, "myprotocol", (void *)url, open_fn);
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}", fmt::ptr(mpv_context), video_url, code, mpv_error_string(code));
-				break;
-			}
-
-			const char *cmd[] = { "loadfile", "myprotocol://fake", NULL };
-			code = mpv_command(mpv_context, cmd);
-			if (code < 0) {
-				has_error = true;
-				SPDLOG_ERROR("mpv_command({}, loadfile, myprotocol://fake) error, code: {}, msg: {}", fmt::ptr(mpv_context), code, mpv_error_string(code));
-				break;
-			}
+		if (!create_mpv_players(index, w, m_index_to_mpv_handle, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path)) {
+			stop_players();
+			return false;
 		}
 	}
 
-	if (has_error) {
-		destroy();
-	}
-
-	return has_error;
+	return true;
 }
 
 
-void MpvWrapper::destroy()
+void MpvWrapper::stop_players()
 {
-	for (auto iter = m_index_to_mpv.begin(); iter != m_index_to_mpv.end(); iter++) {
+	for (auto iter = m_index_to_mpv_handle.begin(); iter != m_index_to_mpv_handle.end(); iter++) {
 		mpv_handle *ctx = iter->second;
 		if (ctx != nullptr) {
 			mpv_terminate_destroy(ctx);
 		}
 	}
 
-	m_index_to_mpv.clear();
+	m_index_to_mpv_handle.clear();
 }

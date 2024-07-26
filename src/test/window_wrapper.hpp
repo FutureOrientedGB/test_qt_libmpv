@@ -46,7 +46,7 @@ public:
 
 
 private:
-	MpvWrapper m_mpv_wrapper;
+	MpvManager m_mpv_wrapper;
 
 	PlayerWays m_layout_ways;
 	QWidget* m_central_widget;

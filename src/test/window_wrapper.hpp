@@ -5,7 +5,7 @@
 #include <string>
 
 // project
-#include "mpv_wrapper.hpp"
+#include "mpv_manager.hpp"
 
 // qt
 #include <QtWidgets/QGridLayout>
@@ -46,7 +46,7 @@ public:
 
 
 private:
-	MpvManager m_mpv_wrapper;
+	MpvManager m_mpv_manager;
 
 	PlayerWays m_layout_ways;
 	QWidget* m_central_widget;

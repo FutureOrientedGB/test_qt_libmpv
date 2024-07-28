@@ -120,7 +120,7 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 	}
 
 
-	return m_mpv_wrapper.start_players(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
+	return m_mpv_manager.start_players(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
 }
 
 
@@ -129,5 +129,5 @@ void WindowWrapper::destroy_players()
 	m_index_to_widget.clear();
 	m_layout_ways = PlayerWays::Zero;
 
-	m_mpv_wrapper.stop_players();
+	m_mpv_manager.stop_players();
 }

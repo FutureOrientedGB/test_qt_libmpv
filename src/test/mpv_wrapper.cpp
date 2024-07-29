@@ -21,12 +21,6 @@
 #include <spdlog/spdlog.h>
 
 
-#define READ_INTERVAL_MS 39
-#define READ_BUFFER_SIZE 32768
-#define STEADY_CLOCK_NOW() std::chrono::steady_clock::now()
-#define STEADY_CLOCK_DURATION(begin) std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count()
-
-
 
 int64_t size_fn(void *cookie)
 {
@@ -73,8 +67,8 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 
 
 MpvWrapper::MpvWrapper(uint32_t buffer_size)
-	: m_mpv_context(nullptr)
-	, m_stopping(false)
+	: m_stopping(false)
+	, m_mpv_context(nullptr)
 {
 	m_spsc.reset(buffer_size);
 }
@@ -86,111 +80,75 @@ MpvWrapper::~MpvWrapper()
 }
 
 
-bool MpvWrapper::start(int index, QWidget *container, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
+bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
 {
-	m_mpv_context = mpv_create();
-	if (nullptr == m_mpv_context) {
-		SPDLOG_ERROR("mpv_create() error");
+	if (!create_handle()) {
 		return false;
 	}
 
-	int code = 0;
-
-	int64_t wid = (int64_t)container->winId();
-	code = mpv_set_option(m_mpv_context, "wid", MPV_FORMAT_INT64, &wid);
-	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_option({}, wid, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), wid, code, mpv_error_string(code));
+	if (!set_option("wid", container_wid)) {
 		return false;
 	}
 
 	if (!profile.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "profile", profile.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option({}, profile, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), profile, code, mpv_error_string(code));
+		if (!set_option("profile", profile)) {
 			return false;
 		}
 	}
 
 	if (!vo.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "vo", vo.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option({}, vo, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), vo, code, mpv_error_string(code));
+		if (!set_option("vo", vo)) {
 			return false;
 		}
 	}
 
 	if (!hwdec.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "hwdec", hwdec.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option({}, hwdec, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), hwdec, code, mpv_error_string(code));
+		if (!set_option("hwdec", hwdec)) {
 			return false;
 		}
 	}
 
 	if (!gpu_api.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "gpu-api", gpu_api.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option({}, gpu-api, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), gpu_api, code, mpv_error_string(code));
+		if (!set_option("gpu-api", gpu_api)) {
 			return false;
 		}
 	}
 
 	if (!gpu_context.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "gpu-context", gpu_context.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option({}, gpu-context, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), gpu_context, code, mpv_error_string(code));
+		if (!set_option("gpu-context", gpu_context)) {
 			return false;
 		}
 	}
 
 	if (!log_level.empty()) {
-		code = mpv_request_log_messages(m_mpv_context, log_level.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_request_log_messages({}, log_level) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), log_level, code, mpv_error_string(code));
+		if (!set_log_level(log_level)) {
 			return false;
 		}
 	}
 
 	if (!log_path.empty()) {
-		code = mpv_set_option_string(m_mpv_context, "log-file", QString::fromStdString(log_path).replace(".log", QString(".%1.log").arg(index)).toStdString().c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option_string({}, log-file, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), log_path, code, mpv_error_string(code));
+		if (!set_option("log-file", QString::fromStdString(log_path).replace(".log", QString(".%1.log").arg(index)).toStdString())) {
 			return false;
 		}
 	}
 
-	code = mpv_initialize(m_mpv_context);
-	if (code < 0) {
-		SPDLOG_ERROR("mpv_initialize({}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), wid, code, mpv_error_string(code));
+	if (!initialize_handle()) {
 		return false;
 	}
 
 	if (!QFile(QString::fromStdString(video_url)).exists()) {
 		// read from network
-		code = mpv_set_option_string(m_mpv_context, "stream-open-filename", video_url.c_str());
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_set_option_string({}, stream-open-filename, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), video_url, code, mpv_error_string(code));
-			return false;
-		}
-
-		code = mpv_command_string(m_mpv_context, "play");
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_command_string({}, play) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		if (!call_command({ "loadfile", video_url })) {
 			return false;
 		}
 	}
 	else {
 		// read from file
-		code = mpv_stream_cb_add_ro(m_mpv_context, "myprotocol", (void *)this, open_fn);
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), video_url, code, mpv_error_string(code));
+		if (!add_io_read_callbacks()) {
 			return false;
 		}
 
-		const char *cmd[] = { "loadfile", "myprotocol://fake", NULL };
-		code = mpv_command(m_mpv_context, cmd);
-		if (code < 0) {
-			SPDLOG_ERROR("mpv_command({}, loadfile, myprotocol://fake) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		if (!call_command({ "loadfile", "myprotocol://fake" })) {
 			return false;
 		}
 	}
@@ -205,10 +163,138 @@ void MpvWrapper::stop()
 {
 	m_stopping = true;
 
+	m_spsc.reset(0);
+
 	if (m_mpv_context != nullptr) {
-		mpv_terminate_destroy(m_mpv_context);
+		mpv_destroy(m_mpv_context);
 	}
 	m_mpv_context = nullptr;
+}
+
+
+void MpvWrapper::stopping()
+{
+	m_stopping = true;
+
+	m_spsc.stopping();
+}
+
+
+bool MpvWrapper::create_handle()
+{
+	m_mpv_context = mpv_create();
+	if (nullptr == m_mpv_context) {
+		SPDLOG_ERROR("mpv_create() error");
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::initialize_handle()
+{
+	int code = mpv_initialize(m_mpv_context);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_initialize({}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::add_io_read_callbacks()
+{
+	int code = mpv_stream_cb_add_ro(m_mpv_context, "myprotocol", (void *)this, open_fn);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::set_log_level(std::string min_level)
+{
+	int code = mpv_request_log_messages(m_mpv_context, min_level.c_str());
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_request_log_messages({}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), min_level, code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::call_command(std::vector<std::string> args)
+{
+	// new array of str
+	char **cmd = new char *[args.size() + 1];
+	for (int i = 0; i < args.size(); i++) {
+		char *c = new char[args[i].size() + 1];
+		strncpy(c, args[i].c_str(), args[i].size());
+		c[args[i].size()] = '\0';
+
+		cmd[i] = c;
+	}
+	cmd[args.size()] = NULL;
+
+	int code = mpv_command(m_mpv_context, (const char **)cmd);
+
+	// delete array of str
+	for (int i = 0; i < args.size(); i++) {
+		delete[] cmd[i];
+	}
+	delete[] cmd;
+
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_command({}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), fmt::join(args, ", "), code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::set_option(std::string key, bool value)
+{
+	int v = value ? 1 : 0;
+	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_FLAG, &v);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_set_option_flag({}, {}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::set_option(std::string key, int64_t value)
+{
+	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_INT64, &value);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_set_option_int64({}, {}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::set_option(std::string key, double value)
+{
+	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_DOUBLE, &value);
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_set_option_double({}, {}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		return false;
+	}
+	return true;
+}
+
+
+bool MpvWrapper::set_option(std::string key, std::string value)
+{
+	int code = mpv_set_option_string(m_mpv_context, key.c_str(), value.c_str());
+	if (code < 0) {
+		SPDLOG_ERROR("mpv_set_option_string({}, {}, {}) error, code: {}, msg: {}", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		return false;
+	}
+	return true;
 }
 
 
@@ -218,18 +304,28 @@ bool MpvWrapper::is_buffer_null()
 }
 
 
-void MpvWrapper::write(const uint8_t *buf, uint32_t length)
+bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
 {
-	uint32_t offset = 0;
-	while (!m_stopping && offset < length && m_mpv_context != nullptr) {
-		offset += m_spsc.put(buf + offset, length - offset);
+	if (m_stopping) {
+		return false;
 	}
+
+	uint32_t offset = 0;
+	while (offset < length) {
+		uint32_t c = m_spsc.put_if_not_full(buf, length);
+		offset += c;
+		if (0 == c) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+	}
+
+	return true;
 }
 
 
 int64_t MpvWrapper::read(char *buf, uint64_t nbytes)
 {
-	return (int64_t)m_spsc.get((uint8_t *)buf, (uint32_t)nbytes);
+	return (int64_t)m_spsc.get_if_not_empty((uint8_t *)buf, (uint32_t)nbytes);;
 }
 
 

@@ -58,7 +58,7 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 	}
 
 	// re-create
-	const double epsinon = 0.00000001;
+	const double epsinon = 1e-8;
 	double sqrt_root = sqrt((int)ways);
 	int rows = 0;
 	int columns = 0;

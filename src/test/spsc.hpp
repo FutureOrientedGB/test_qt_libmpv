@@ -9,6 +9,13 @@
 #include <memory>
 #include <vector>
 
+// spdlog
+#include <spdlog/spdlog.h>
+
+
+
+#define LOAD_ATOMIC_RELAXED(offset) offset.load(std::memory_order_relaxed)
+#define STORE_ATOMIC_RELAXED(offset, value) offset.store(value, std::memory_order_relaxed)
 
 
 inline uint32_t roundup_pow_of_two(uint32_t n)
@@ -43,13 +50,16 @@ class lock_free_spsc
 {
 public:
 	lock_free_spsc()
-		: m_input_offset(0)
+		: m_stopping(false)
+		, m_input_offset(0)
 		, m_output_offset(0)
+
 	{
 	}
 
 	lock_free_spsc(uint32_t buffer_size)
-		: m_input_offset(0)
+		: m_stopping(false)
+		, m_input_offset(0)
 		, m_output_offset(0)
 	{
 		reset(buffer_size);
@@ -60,14 +70,22 @@ public:
 		reset(0);
 	}
 
+	void stopping()
+	{
+		m_stopping = true;
+	}
+
 	void reset(uint32_t buffer_size)
 	{
+		m_input_offset = 0;
+		m_output_offset = 0;
+
 		if (0 == buffer_size) {
-			m_ring_buffer.clear();
-			m_input_offset = 0;
-			m_output_offset = 0;
+			m_stopping = true;
 		}
 		else {
+			m_stopping = false;
+
 			if (buffer_size & (buffer_size - 1)) {
 				buffer_size = roundup_pow_of_two(buffer_size);
 			}
@@ -78,6 +96,11 @@ public:
 		}
 	}
 
+	void clear()
+	{
+		get_all();
+	}
+
 	uint32_t buffer_size()
 	{
 		return (uint32_t)m_ring_buffer.buffer_size();
@@ -85,7 +108,7 @@ public:
 
 	bool is_buffer_null()
 	{
-		return m_ring_buffer.empty();
+		return m_ring_buffer.empty() && 0 == m_ring_buffer.capacity();
 	}
 
 	bool is_buffer_empty()
@@ -100,12 +123,12 @@ public:
 
 	uint32_t available_data_size()
 	{
-		return load_relaxed(m_input_offset) - load_relaxed(m_output_offset);
+		return LOAD_ATOMIC_RELAXED(m_input_offset) - LOAD_ATOMIC_RELAXED(m_output_offset);
 	}
 
 	uint32_t available_space_size()
 	{
-		return (uint32_t)m_ring_buffer.buffer_size() - load_relaxed(m_input_offset) + load_relaxed(m_output_offset);
+		return (uint32_t)m_ring_buffer.buffer_size() - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset);
 	}
 
 	uint32_t put(const T item)
@@ -119,11 +142,31 @@ public:
 		return put(input_buffer.data(), (uint32_t)input_buffer.buffer_size());
 	}
 
+	uint32_t put_if_not_full(const T *input_buffer, uint32_t length)
+	{
+		uint32_t offset = 0;
+		while (!m_stopping && offset < length) {
+			uint32_t c = put(input_buffer + offset, length - offset);
+			if (0 == c) {
+				SPDLOG_WARN("no space available");
+				break;
+			}
+
+			offset += c;
+			if (!m_stopping && offset < length) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			else {
+				break;
+			}
+		}
+		return offset;
+	}
+
 	uint32_t put(const T *input_buffer, uint32_t length)
 	{
 		uint32_t buffer_size = (uint32_t)m_ring_buffer.size();
-
-		length = std::min(length, buffer_size - load_relaxed(m_input_offset) + load_relaxed(m_output_offset));
+		length = std::min(length, buffer_size - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
 			return 0;
 		}
@@ -131,7 +174,7 @@ public:
 		// ensure that we sample the input offset before we start putting bytes into the buffer
 		std::atomic_thread_fence(std::memory_order_acquire);
 
-		uint32_t write_offset = load_relaxed(m_input_offset) & (buffer_size - 1);
+		uint32_t write_offset = LOAD_ATOMIC_RELAXED(m_input_offset) & (buffer_size - 1);
 
 		// first put the data starting from in to buffer end
 		uint32_t first_part = std::min(length, buffer_size - write_offset);
@@ -143,19 +186,19 @@ public:
 		// ensure that we add the bytes to the buffer before we update the input offset
 		std::atomic_thread_fence(std::memory_order_release);
 
-		store_relaxed(m_input_offset, load_relaxed(m_input_offset) + length);
+		STORE_ATOMIC_RELAXED(m_input_offset, LOAD_ATOMIC_RELAXED(m_input_offset) + length);
 
 		return length;
 	}
 
 	uint32_t peek(T &item)
 	{
-		uint32_t length = std::min(1u, load_relaxed(m_input_offset) - load_relaxed(m_output_offset));
+		uint32_t length = std::min(1u, LOAD_ATOMIC_RELAXED(m_input_offset) - LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
 			return 0;
 		}
 
-		uint32_t read_offset = load_relaxed(m_output_offset) & ((uint32_t)m_ring_buffer.size() - 1);
+		uint32_t read_offset = LOAD_ATOMIC_RELAXED(m_output_offset) & ((uint32_t)m_ring_buffer.size() - 1);
 		item = m_ring_buffer[read_offset];
 
 		return length;
@@ -171,12 +214,44 @@ public:
 
 	uint32_t get(std::vector<T> &output_buffer)
 	{
-		return get(output_buffer.data(), (uint32_t)output_buffer.buffer_size());
+		return get(output_buffer.data(), (uint32_t)output_buffer.size());
+	}
+
+	std::vector<T> get_all()
+	{
+		std::vector<T> result(available_data_size());
+		if (result.empty()) {
+			return result;
+		}
+
+		get(result);
+		return result;
+	}
+
+	uint32_t get_if_not_empty(T *output_buffer, uint32_t length)
+	{
+		uint32_t offset = 0;
+		while (!m_stopping && 0 == offset) {
+			uint32_t c = get(output_buffer + offset, length - offset);
+			if (c == 0 && offset > 0) {
+				SPDLOG_WARN("no data available");
+				break;
+			}
+
+			offset += c;
+			if (!m_stopping && 0 == offset) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			else {
+				break;
+			}
+		}
+		return offset;
 	}
 
 	uint32_t get(T *output_buffer, uint32_t length)
 	{
-		length = std::min(length, load_relaxed(m_input_offset) - load_relaxed(m_output_offset));
+		length = std::min(length, LOAD_ATOMIC_RELAXED(m_input_offset) - LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
 			return 0;
 		}
@@ -186,7 +261,7 @@ public:
 
 		uint32_t buffer_size = (uint32_t)m_ring_buffer.size();
 
-		uint32_t read_offset = load_relaxed(m_output_offset) & (buffer_size - 1);
+		uint32_t read_offset = LOAD_ATOMIC_RELAXED(m_output_offset) & (buffer_size - 1);
 
 		// first get the data from out until the end of the buffer
 		uint32_t first_part = std::min(length, buffer_size - read_offset);
@@ -198,25 +273,14 @@ public:
 		// ensure that we remove the bytes from the buffer before we update the output offset
 		std::atomic_thread_fence(std::memory_order_release);
 
-		store_relaxed(m_output_offset, load_relaxed(m_output_offset) + length);
+		STORE_ATOMIC_RELAXED(m_output_offset, LOAD_ATOMIC_RELAXED(m_output_offset) + length);
 
 		return length;
 	}
 
 
-protected:
-	inline uint32_t load_relaxed(const std::atomic<uint32_t> &offset) const
-	{
-		return offset.load(std::memory_order_relaxed);
-	}
-
-	inline void store_relaxed(std::atomic<uint32_t> &offset, uint32_t value)
-	{
-		offset.store(value, std::memory_order_relaxed);
-	}
-
-
 private:
+	bool m_stopping;
 	std::vector<T> m_ring_buffer;  // the buffer holding the data
 	std::atomic<uint32_t> m_input_offset;  // data is added at offset: m_input_offset % (size - 1)
 	std::atomic<uint32_t> m_output_offset;  // data is extracted from offset: m_output_offset % (size - 1)

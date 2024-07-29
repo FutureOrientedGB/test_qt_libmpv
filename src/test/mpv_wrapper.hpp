@@ -48,6 +48,7 @@ public:
 
 private:
 	bool m_stopping;
+	uint32_t m_buffer_size;
 	mpv_handle *m_mpv_context;
 	lock_free_spsc<uint8_t> m_spsc;
 };

@@ -82,6 +82,7 @@ public:
 
 		if (0 == buffer_size) {
 			m_stopping = true;
+			m_ring_buffer.clear();
 		}
 		else {
 			m_stopping = false;
@@ -118,7 +119,7 @@ public:
 
 	bool is_buffer_full()
 	{
-		return buffer_size() == available_data_size();
+		return (uint32_t)m_ring_buffer.size() == available_data_size();
 	}
 
 	uint32_t available_data_size()
@@ -128,7 +129,7 @@ public:
 
 	uint32_t available_space_size()
 	{
-		return (uint32_t)m_ring_buffer.buffer_size() - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset);
+		return (uint32_t)m_ring_buffer.size() - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset);
 	}
 
 	uint32_t put(const T item)
@@ -148,7 +149,6 @@ public:
 		while (!m_stopping && offset < length) {
 			uint32_t c = put(input_buffer + offset, length - offset);
 			if (0 == c) {
-				SPDLOG_WARN("no space available");
 				break;
 			}
 
@@ -168,6 +168,10 @@ public:
 		uint32_t buffer_size = (uint32_t)m_ring_buffer.size();
 		length = std::min(length, buffer_size - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
+			SPDLOG_WARN(
+				"no space available, buffer_size({}) - input_offset({}) + output_offset({}) = {}",
+				m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_space_size()
+			);
 			return 0;
 		}
 
@@ -234,7 +238,6 @@ public:
 		while (!m_stopping && 0 == offset) {
 			uint32_t c = get(output_buffer + offset, length - offset);
 			if (c == 0 && offset > 0) {
-				SPDLOG_WARN("no data available");
 				break;
 			}
 
@@ -253,6 +256,11 @@ public:
 	{
 		length = std::min(length, LOAD_ATOMIC_RELAXED(m_input_offset) - LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
+			SPDLOG_WARN(
+				"no data available, buffer_size: {}, input_offset({}) - output_offset({}) = {}",
+				m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_data_size()
+			);
+
 			return 0;
 		}
 

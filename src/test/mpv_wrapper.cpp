@@ -44,8 +44,9 @@ int64_t read_fn(void *cookie, char *buf, uint64_t nbytes)
 
 void close_fn(void *cookie)
 {
-	auto thiz = (MpvWrapper *)cookie;
-	thiz->stop();
+	//call mpv_terminate_destroy/mpv_destroy from close_fn will block forever
+	//auto thiz = (MpvWrapper *)cookie;
+	//thiz->stop();
 }
 
 
@@ -69,8 +70,8 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 MpvWrapper::MpvWrapper(uint32_t buffer_size)
 	: m_stopping(false)
 	, m_mpv_context(nullptr)
+	, m_buffer_size(buffer_size)
 {
-	m_spsc.reset(buffer_size);
 }
 
 
@@ -82,6 +83,8 @@ MpvWrapper::~MpvWrapper()
 
 bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
 {
+	setlocale(LC_NUMERIC, "C");
+
 	if (!create_handle()) {
 		return false;
 	}
@@ -136,6 +139,11 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 		return false;
 	}
 
+	m_spsc.reset(m_buffer_size);
+	if (m_spsc.is_buffer_null()) {
+		return false;
+	}
+
 	if (!QFile(QString::fromStdString(video_url)).exists()) {
 		// read from network
 		if (!call_command({ "loadfile", video_url })) {
@@ -163,10 +171,10 @@ void MpvWrapper::stop()
 {
 	m_stopping = true;
 
-	m_spsc.reset(0);
+	m_spsc.stopping();
 
 	if (m_mpv_context != nullptr) {
-		mpv_destroy(m_mpv_context);
+		mpv_terminate_destroy(m_mpv_context);
 	}
 	m_mpv_context = nullptr;
 }
@@ -311,7 +319,7 @@ bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
 	}
 
 	uint32_t offset = 0;
-	while (offset < length) {
+	while (!m_stopping && offset < length) {
 		uint32_t c = m_spsc.put_if_not_full(buf, length);
 		offset += c;
 		if (0 == c) {

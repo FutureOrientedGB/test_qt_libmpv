@@ -119,7 +119,6 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 		}
 	}
 
-
 	return m_mpv_manager.start_players(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
 }
 

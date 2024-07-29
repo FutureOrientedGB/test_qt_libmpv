@@ -29,8 +29,6 @@ public:
 	bool start_players(std::map<int, QWidget *> &containers, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path);
 	void stop_players();
 
-	void stopping();
-
 
 private:
 	bool m_stopping;

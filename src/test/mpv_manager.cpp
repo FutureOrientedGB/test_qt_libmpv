@@ -31,6 +31,14 @@ MpvManager::MpvManager(uint32_t buffer_size)
 MpvManager::~MpvManager()
 {
 	stop_players();
+
+	if (m_read_file_thread != nullptr) {
+		if (m_read_file_thread->joinable()) {
+			m_read_file_thread->join();
+		}
+		delete m_read_file_thread;
+	}
+	m_read_file_thread = nullptr;
 }
 
 
@@ -38,7 +46,7 @@ MpvManager::~MpvManager()
 bool create_mpv_player(uint32_t buffer_size, int index, int64_t wid, std::map<int, MpvWrapper *> &index_to_mpv, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
 {
 	MpvWrapper *mpv = new MpvWrapper(buffer_size);
-	if (nullptr == mpv || mpv->is_buffer_null()) {
+	if (nullptr == mpv) {
 		return false;
 	}
 
@@ -101,7 +109,9 @@ bool MpvManager::start_players(std::map<int, QWidget *> &containers, std::string
 					}
 				}
 
-				stopping();
+				if (!m_stopping) {
+					stop_players();
+				}
 			}
 		);
 	}
@@ -116,26 +126,16 @@ void MpvManager::stop_players()
 
 	for (auto iter = m_index_to_mpv_wrapper.begin(); iter != m_index_to_mpv_wrapper.end(); iter++) {
 		if (iter->second != nullptr) {
-			iter->second->stop();
+			iter->second->stopping();
+		}
+	}
+
+	for (auto iter = m_index_to_mpv_wrapper.begin(); iter != m_index_to_mpv_wrapper.end(); iter++) {
+		if (iter->second != nullptr) {
 			delete iter->second;
 			iter->second = nullptr;
 		}
 	}
 	m_index_to_mpv_wrapper.clear();
-
-	if (m_read_file_thread != nullptr) {
-		if (m_read_file_thread->joinable()) {
-			m_read_file_thread->join();
-		}
-		delete m_read_file_thread;
-	}
-	m_read_file_thread = nullptr;
 }
 
-
-void MpvManager::stopping()
-{
-	for (auto iter = m_index_to_mpv_wrapper.begin(); !m_stopping && iter != m_index_to_mpv_wrapper.end(); iter++) {
-		iter->second->stopping();
-	}
-}

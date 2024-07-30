@@ -169,8 +169,8 @@ public:
 		length = std::min(length, buffer_size - LOAD_ATOMIC_RELAXED(m_input_offset) + LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
 			SPDLOG_WARN(
-				"no space available, buffer_size({}) - input_offset({}) + output_offset({}) = {}",
-				m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_space_size()
+				"no space available, this: {}, buffer_size({}) - input_offset({}) + output_offset({}) = {}",
+				fmt::ptr(this), m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_space_size()
 			);
 			return 0;
 		}
@@ -257,8 +257,8 @@ public:
 		length = std::min(length, LOAD_ATOMIC_RELAXED(m_input_offset) - LOAD_ATOMIC_RELAXED(m_output_offset));
 		if (length <= 0) {
 			SPDLOG_WARN(
-				"no data available, buffer_size: {}, input_offset({}) - output_offset({}) = {}",
-				m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_data_size()
+				"no data available, this: {}, buffer_size: {}, input_offset({}) - output_offset({}) = {}",
+				fmt::ptr(this), m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_data_size()
 			);
 
 			return 0;

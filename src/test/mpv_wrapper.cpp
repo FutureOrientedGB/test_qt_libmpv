@@ -96,7 +96,11 @@ MpvWrapper::~MpvWrapper()
 }
 
 
-bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
+bool MpvWrapper::start(
+	int index, int64_t container_wid, std::string video_url,
+	std::string profile, std::string vo, std::string hwdec,
+	std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path
+)
 {
 	do {
 		setlocale(LC_NUMERIC, "C");
@@ -127,13 +131,13 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 			}
 		}
 
-		if (!gpu_api.empty()) {
+		if (!gpu_api.empty() && gpu_api != "auto") {
 			if (!set_option("gpu-api", gpu_api)) {
 				break;
 			}
 		}
 
-		if (!gpu_context.empty()) {
+		if (!gpu_context.empty() && gpu_context != "auto") {
 			if (!set_option("gpu-context", gpu_context)) {
 				break;
 			}
@@ -150,7 +154,7 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 		}
 
 		if (!log_path.empty()) {
-			if (!set_option("log-file", log_path.replace(log_path.find(".log"), 3, "") + std::to_string(index) + ".log")) {
+			if (!set_option("log-file", log_path.replace(log_path.find(".log"), 4, std::to_string(index) + ".log"))) {
 				break;
 			}
 		}
@@ -185,14 +189,7 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 		m_stopping = false;
 
 		m_container_wid = container_wid;
-#ifdef _WIN32
-		ShowWindow((HWND)m_container_wid, SW_SHOW);
-#endif // _WIN32
-#ifdef __linux__
-		Display *display = QX11Info::display();
-		XMapWindow(display, container_wid);
-		XFlush(display);
-#endif
+		set_container_window_visiable(true);
 
 		return true;
 	} while (false);
@@ -209,14 +206,7 @@ void MpvWrapper::stop()
 
 	m_spsc.stopping();
 
-#ifdef _WIN32
-	ShowWindow((HWND)m_container_wid, SW_HIDE);
-#endif // _WIN32
-#ifdef __linux__
-	Display *display = QX11Info::display();
-	XUnmapWindow(display, m_container_wid);
-	XFlush(display);
-#endif
+	set_container_window_visiable(false);
 	m_container_wid = 0;
 
 	if (m_mpv_context != nullptr) {
@@ -231,6 +221,150 @@ void MpvWrapper::stopping()
 	m_stopping = true;
 
 	m_spsc.stopping();
+}
+
+
+bool MpvWrapper::is_buffer_null()
+{
+	return m_spsc.is_buffer_null();
+}
+
+
+bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
+{
+	if (m_stopping) {
+		return false;
+	}
+
+	uint32_t offset = 0;
+	while (!m_stopping && offset < length) {
+		uint32_t c = m_spsc.put_if_not_full(buf, length);
+		offset += c;
+		if (0 == c) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+	}
+
+	return true;
+}
+
+
+int64_t MpvWrapper::read(char *buf, uint64_t nbytes)
+{
+	return (int64_t)m_spsc.get_if_not_empty((uint8_t *)buf, (uint32_t)nbytes);;
+}
+
+
+bool MpvWrapper::play()
+{
+	return call_command({ "play" });
+}
+
+
+bool MpvWrapper::pause()
+{
+	return call_command({ "pause" });
+}
+
+
+bool MpvWrapper::step()
+{
+	return call_command({ "frame-step" });
+}
+
+
+bool MpvWrapper::get_mute_state()
+{
+	bool r;
+	get_property("mute", r);
+	return r;
+}
+
+
+void MpvWrapper::set_mute_state(const bool state)
+{
+	set_property("mute", state);
+}
+
+
+int MpvWrapper::get_volume()
+{
+	double v = 0.0;
+	get_property("volume", v);
+	return (int)v;
+}
+
+
+void MpvWrapper::set_volume(const int v)
+{
+	set_property("volume", (double)v);
+}
+
+
+bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
+{
+	bool r1 = get_property("width", width);
+	bool r2 = get_property("height", height);
+	return r1 && r2;
+}
+
+
+double MpvWrapper::get_speed()
+{
+	double r;
+	return get_property("speed", r);
+	return r;
+}
+
+
+bool MpvWrapper::set_speed(double v)
+{
+	return set_property("speed", v);
+}
+
+
+bool MpvWrapper::screenshot(std::string &path)
+{
+#ifdef _WIN32
+	char *temp_dir = getenv("TEMP");
+#else
+	char *temp_dir = getenv("TMPDIR");
+#endif // _WIN32
+
+	auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	path = fmt::format("{}/{}.jpeg", temp_dir, timestamp_ms);
+
+	if (call_command({ "screenshot-to-file", path })) {
+		int timeout_ms = 3000;
+		int sleep_ms = 100;
+		while (timeout_ms > 0) {
+			// open file
+			std::ifstream file(path, std::ios::binary);
+			if (!file.is_open()) {
+				timeout_ms -= sleep_ms;
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+				continue;
+			}
+
+			// get file size
+			file.seekg(0, std::ios::end);
+			std::streampos file_size = file.tellg();
+			file.seekg(0, std::ios::beg);
+			if (file_size < 1024) {
+				file.close();
+				timeout_ms -= sleep_ms;
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+				continue;
+			}
+
+			// close file
+			file.close();
+
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -443,147 +577,21 @@ bool MpvWrapper::set_property(std::string key, std::string value)
 }
 
 
-bool MpvWrapper::is_buffer_null()
-{
-	return m_spsc.is_buffer_null();
-}
-
-
-bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
-{
-	if (m_stopping) {
-		return false;
-	}
-
-	uint32_t offset = 0;
-	while (!m_stopping && offset < length) {
-		uint32_t c = m_spsc.put_if_not_full(buf, length);
-		offset += c;
-		if (0 == c) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		}
-	}
-
-	return true;
-}
-
-
-int64_t MpvWrapper::read(char *buf, uint64_t nbytes)
-{
-	return (int64_t)m_spsc.get_if_not_empty((uint8_t *)buf, (uint32_t)nbytes);;
-}
-
-
-bool MpvWrapper::play()
-{
-	return call_command({ "play" });
-}
-
-
-bool MpvWrapper::pause()
-{
-	return call_command({ "pause" });
-}
-
-
-bool MpvWrapper::step()
-{
-	return call_command({ "frame-step" });
-}
-
-
-bool MpvWrapper::get_mute_state()
-{
-	bool r;
-	get_property("mute", r);
-	return r;
-}
-
-
-void MpvWrapper::set_mute_state(const bool state)
-{
-	set_property("mute", state);
-}
-
-
-int MpvWrapper::get_volume()
-{
-	double v = 0.0;
-	get_property("volume", v);
-	return (int)v;
-}
-
-
-void MpvWrapper::set_volume(const int v)
-{
-	set_property("volume", (double)v);
-}
-
-
-bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
-{
-	bool r1 = get_property("width", width);
-	bool r2 = get_property("height", height);
-	return r1 && r2;
-}
-
-
-double MpvWrapper::get_speed()
-{
-	double r;
-	return get_property("speed", r);
-	return r;
-}
-
-
-bool MpvWrapper::set_speed(double v)
-{
-	return set_property("speed", v);
-}
-
-
-bool MpvWrapper::screenshot(std::string &path)
+void MpvWrapper::set_container_window_visiable(bool state)
 {
 #ifdef _WIN32
-	char *temp_dir = getenv("TEMP");
-#else
-	char *temp_dir = getenv("TMPDIR");
+	ShowWindow((HWND)m_container_wid, state ? SW_SHOW : SW_HIDE);
 #endif // _WIN32
 
-	auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	path = fmt::format("{}/{}.jpeg", temp_dir, timestamp_ms);
-
-	if (call_command({ "screenshot-to-file", path })) {
-		int timeout_ms = 3000;
-		int sleep_ms = 100;
-		while (timeout_ms > 0) {
-			// open file
-			std::ifstream file(path, std::ios::binary);
-			if (!file.is_open()) {
-				timeout_ms -= sleep_ms;
-				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-				continue;
-			}
-
-			// get file size
-			file.seekg(0, std::ios::end);
-			std::streampos file_size = file.tellg();
-			file.seekg(0, std::ios::beg);
-			if (file_size < 1024) {
-				file.close();
-				timeout_ms -= sleep_ms;
-				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-				continue;
-			}
-
-			// close file
-			file.close();
-
-			return true;
-		}
+#ifdef __linux__
+	Display *display = QX11Info::display();
+	if (state) {
+		XMapWindow(display, m_container_wid);
 	}
-
-	return false;
+	else {
+		XUnmapWindow(display, m_container_wid);
+	}
+	XFlush(display);
+#endif
 }
-
 

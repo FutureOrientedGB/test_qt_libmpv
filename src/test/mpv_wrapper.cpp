@@ -29,6 +29,11 @@
 #include <Windows.h>
 #endif // _WIN32
 
+// linux
+#ifdef __linux__
+#include <X11/Xlib.h>
+#endif
+
 
 
 int64_t size_fn(void *cookie)
@@ -181,8 +186,13 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 
 		m_container_wid = container_wid;
 #ifdef _WIN32
-		ShowWindow((HWND)container_wid, SW_SHOW);
+		ShowWindow((HWND)m_container_wid, SW_SHOW);
 #endif // _WIN32
+#ifdef __linux__
+		Display *display = QX11Info::display();
+		XMapWindow(display, container_wid);
+		XFlush(display);
+#endif
 
 		return true;
 	} while (false);
@@ -202,6 +212,12 @@ void MpvWrapper::stop()
 #ifdef _WIN32
 	ShowWindow((HWND)m_container_wid, SW_HIDE);
 #endif // _WIN32
+#ifdef __linux__
+	Display *display = QX11Info::display();
+	XUnmapWindow(display, m_container_wid);
+	XFlush(display);
+#endif
+	m_container_wid = 0;
 
 	if (m_mpv_context != nullptr) {
 		mpv_terminate_destroy(m_mpv_context);

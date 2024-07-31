@@ -87,7 +87,7 @@ public:
 	bool get_resolution(int64_t &width, int64_t &height);
 
 	// take screenshot from video
-	bool screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &height);
+	bool screenshot(std::string &path);
 
 
 private:

@@ -507,7 +507,7 @@ bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
 }
 
 
-bool MpvWrapper::screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &height)
+bool MpvWrapper::screenshot(std::string &path)
 {
 #ifdef _WIN32
 	char *temp_dir = getenv("TEMP");
@@ -516,7 +516,7 @@ bool MpvWrapper::screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &
 #endif // _WIN32
 
 	auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	std::string path = fmt::format("{}/{}.jpeg", temp_dir, timestamp_ms);
+	path = fmt::format("{}/{}.jpeg", temp_dir, timestamp_ms);
 
 	if (call_command({ "screenshot-to-file", path })) {
 		int timeout_ms = 3000;
@@ -525,8 +525,8 @@ bool MpvWrapper::screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &
 			// open file
 			std::ifstream file(path, std::ios::binary);
 			if (!file.is_open()) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 				timeout_ms -= sleep_ms;
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 				continue;
 			}
 
@@ -536,25 +536,16 @@ bool MpvWrapper::screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &
 			file.seekg(0, std::ios::beg);
 			if (file_size < 1024) {
 				file.close();
-				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 				timeout_ms -= sleep_ms;
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 				continue;
 			}
-
-			// read file
-			pic.resize(file_size, 0);
-			file.read((char *)pic.data(), file_size);
 
 			// close file
 			file.close();
 
-			// remove file
-			remove(path.c_str());
-
-			return get_resolution(width, height);
+			return true;
 		}
-
-		return false;
 	}
 
 	return false;

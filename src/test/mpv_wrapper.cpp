@@ -18,6 +18,13 @@
 // spdlog
 #include <spdlog/spdlog.h>
 
+// windows
+#ifdef _WIN32
+#define VC_EXTRALEAN
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif // _WIN32
+
 
 
 int64_t size_fn(void *cookie)
@@ -167,6 +174,11 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 
 		m_stopping = false;
 
+		m_container_wid = container_wid;
+#ifdef _WIN32
+		ShowWindow((HWND)container_wid, SW_SHOW);
+#endif // _WIN32
+
 		return true;
 	} while (false);
 
@@ -181,6 +193,10 @@ void MpvWrapper::stop()
 	m_stopping = true;
 
 	m_spsc.stopping();
+
+#ifdef _WIN32
+	ShowWindow((HWND)m_container_wid, SW_HIDE);
+#endif // _WIN32
 
 	if (m_mpv_context != nullptr) {
 		mpv_terminate_destroy(m_mpv_context);
@@ -500,7 +516,7 @@ bool MpvWrapper::screenshot(std::vector<uint8_t> &pic, int64_t &width, int64_t &
 #endif // _WIN32
 
 	auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	std::string path = fmt::format("{}/{}.jpeg", timestamp_ms);
+	std::string path = fmt::format("{}/{}.jpeg", temp_dir, timestamp_ms);
 
 	if (call_command({ "screenshot-to-file", path })) {
 		int timeout_ms = 3000;

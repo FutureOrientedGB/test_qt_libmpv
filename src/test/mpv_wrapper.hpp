@@ -18,7 +18,7 @@ public:
 	~MpvWrapper();
 
 	// start player
-	bool start(int index, int64_t container_wid, std::string video_url = "", std::string profile = "", std::string vo = "", std::string hwdec = "", std::string gpu_api = "", std::string gpu_context = "", std::string log_level = "v", std::string log_path = "");
+	bool start(int index, int64_t container_wid, std::string video_url = "", std::string profile = "low-latency", std::string vo = "", std::string hwdec = "", std::string gpu_api = "", std::string gpu_context = "", std::string log_level = "v", std::string log_path = "");
 	// stop player
 	void stop();
 
@@ -97,6 +97,8 @@ private:
 	uint32_t m_buffer_size;
 	// mpv handle ctx
 	mpv_handle *m_mpv_context;
+	// player's parent window id
+	int64_t m_container_wid;
 	// spsc
 	lock_free_spsc<uint8_t> m_spsc;
 };

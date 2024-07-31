@@ -20,8 +20,12 @@
 
 // windows
 #ifdef _WIN32
+#ifndef VC_EXTRALEAN
 #define VC_EXTRALEAN
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
 #endif // _WIN32
 
@@ -129,7 +133,7 @@ bool MpvWrapper::start(int index, int64_t container_wid, std::string video_url, 
 			}
 		}
 
-		if (!set_option("keepaspect", "no")) {
+		if (!set_option("keepaspect", std::string("no"))) {
 			break;
 		}
 

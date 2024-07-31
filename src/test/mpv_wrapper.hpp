@@ -86,6 +86,10 @@ public:
 	// get video resolution
 	bool get_resolution(int64_t &width, int64_t &height);
 
+	// get speed
+	double get_speed();
+	bool set_speed(double v);
+
 	// take screenshot from video
 	bool screenshot(std::string &path);
 
@@ -93,12 +97,12 @@ public:
 private:
 	// flag to break infinite loop
 	bool m_stopping;
-	// spsc size
-	uint32_t m_buffer_size;
 	// mpv handle ctx
 	mpv_handle *m_mpv_context;
 	// player's parent window id
 	int64_t m_container_wid;
+	// spsc size
+	uint32_t m_buffer_size;
 	// spsc
 	lock_free_spsc<uint8_t> m_spsc;
 };

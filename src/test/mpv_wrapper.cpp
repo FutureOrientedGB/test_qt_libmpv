@@ -79,6 +79,7 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 MpvWrapper::MpvWrapper(uint32_t buffer_size)
 	: m_stopping(false)
 	, m_mpv_context(nullptr)
+	, m_container_wid(0)
 	, m_buffer_size(buffer_size)
 {
 }
@@ -508,6 +509,20 @@ bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
 	bool r1 = get_property("width", width);
 	bool r2 = get_property("height", height);
 	return r1 && r2;
+}
+
+
+double MpvWrapper::get_speed()
+{
+	double r;
+	return get_property("speed", r);
+	return r;
+}
+
+
+bool MpvWrapper::set_speed(double v)
+{
+	return set_property("speed", v);
 }
 
 

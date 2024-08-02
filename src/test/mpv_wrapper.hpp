@@ -19,7 +19,7 @@ public:
 
 	// start player
 	bool start(
-		int index, int64_t container_wid, std::string video_url = "",
+		int64_t container_wid, bool mix_cpu_gpu_use = false, std::string video_url = "",
 		std::string profile = "low-latency", std::string vo = "gpu",
 		std::string hwdec = "auto", std::string gpu_api = "auto",
 		std::string gpu_context = "auto", std::string log_level = "v", std::string log_path = ""

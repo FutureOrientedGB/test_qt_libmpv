@@ -29,7 +29,11 @@ WindowWrapper::~WindowWrapper()
 }
 
 
-bool WindowWrapper::create_players(int ways, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path)
+bool WindowWrapper::create_players(
+	int ways, bool mix_cpu_gpu_use, std::string video_url,
+	std::string profile, std::string vo, std::string hwdec, std::string gpu_api,
+	std::string gpu_context, std::string log_level, std::string log_path
+)
 {
 	// validate parameter
 	PlayerWays player_ways = (PlayerWays)ways;
@@ -119,7 +123,7 @@ bool WindowWrapper::create_players(int ways, std::string video_url, std::string 
 		}
 	}
 
-	return m_mpv_manager.start_players(m_index_to_widget, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
+	return m_mpv_manager.start_players(m_index_to_widget, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
 }
 
 

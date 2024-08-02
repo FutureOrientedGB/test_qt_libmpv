@@ -97,11 +97,28 @@ MpvWrapper::~MpvWrapper()
 
 
 bool MpvWrapper::start(
-	int index, int64_t container_wid, std::string video_url,
+	int64_t container_wid, bool mix_cpu_gpu_use, std::string video_url,
 	std::string profile, std::string vo, std::string hwdec,
 	std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path
 )
 {
+	// auto-incrementing index
+	static std::atomic<uint16_t> index = 0;
+	uint16_t i = index.load(std::memory_order_acquire);
+	if (0 == i % 2) {
+		if (mix_cpu_gpu_use) {
+			hwdec = "auto";  // even index: use gpu
+		}
+	}
+	else {
+		if (mix_cpu_gpu_use) {
+			hwdec = "";  // odd index: use cpu
+		}
+	}
+	std::string log_path_new = log_path;
+	log_path_new.replace(log_path_new.find(".log"), 4, "." + std::to_string(i) + ".log");
+	index.store(i + 1, std::memory_order_relaxed);
+
 	do {
 		setlocale(LC_NUMERIC, "C");
 
@@ -154,7 +171,7 @@ bool MpvWrapper::start(
 		}
 
 		if (!log_path.empty()) {
-			if (!set_option("log-file", log_path.replace(log_path.find(".log"), 4, std::to_string(index) + ".log"))) {
+			if (!set_option("log-file", log_path_new)) {
 				break;
 			}
 		}
@@ -584,7 +601,7 @@ void MpvWrapper::set_container_window_visiable(bool state)
 #endif // _WIN32
 
 #ifdef __linux__
-	Display *display = QX11Info::display();
+	Display *display = X11Info::display();
 	if (state) {
 		XMapWindow(display, m_container_wid);
 	}

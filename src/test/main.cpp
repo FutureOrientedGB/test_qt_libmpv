@@ -25,6 +25,7 @@ public:
         : log_path("test_qt_libmpv.log")
         , log_level((int)spdlog::level::info)
         , ways(1)
+        , mix_cpu_gpu_use(false)
         , profile("low-latency")
         , vo("")
         , hwdec("auto")
@@ -43,6 +44,7 @@ public:
     {
         app.add_option("--log_path", log_path, fmt::format("log path (default {})", log_path));
         app.add_option("--log_level", log_level, "log level (default spdlog::level::info)");
+        app.add_option("--mix_cpu_gpu_use", mix_cpu_gpu_use, fmt::format("mix_cpu_gpu_use (default {})", mix_cpu_gpu_use));
         app.add_option("--ways", ways, fmt::format("ways (default {})", ways));
         app.add_option("--video_url", video_url, "video file path or stream url");
         app.add_option("--profile", profile, fmt::format("mpv profile (default {})", profile));
@@ -61,6 +63,7 @@ public:
     std::string log_path;
     int log_level;
     int ways;
+    bool mix_cpu_gpu_use;
     std::string video_url;
     std::string profile;
     std::string vo;
@@ -102,7 +105,7 @@ int main(int argc, char** argv) {
     w.setGeometry(args.window_left_pos, args.window_top_pos, args.window_width, args.window_height);
     w.show();
 
-    if (!w.create_players(args.ways, args.video_url, args.profile, args.vo, args.hwdec, args.gpu_api, args.gpu_context, args.mpv_log_level, args.mpv_log_path)) {
+    if (!w.create_players(args.ways, args.mix_cpu_gpu_use, args.video_url, args.profile, args.vo, args.hwdec, args.gpu_api, args.gpu_context, args.mpv_log_level, args.mpv_log_path)) {
         SPDLOG_ERROR("create_players error");
         return -2;
     }

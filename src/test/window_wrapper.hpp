@@ -41,7 +41,11 @@ public:
 	WindowWrapper();
 	~WindowWrapper();
 
-	bool create_players(int ways, std::string video_url, std::string profile, std::string vo, std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path);
+	bool create_players(
+		int ways, bool mix_cpu_gpu_use, std::string video_url,
+		std::string profile,std::string vo, std::string hwdec, std::string gpu_api,
+		std::string gpu_context, std::string log_level, std::string log_path
+	);
 	void destroy_players();
 
 

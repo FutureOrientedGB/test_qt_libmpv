@@ -26,6 +26,13 @@ set(ENV{VCPKG_INCLUDE_PATH} "${VCPKG_DIR}/include")
 set(ENV{VCPKG_BIN_PATH} "${VCPKG_DIR}/bin")
 
 
+# deps dir
+set(ENV{DEPS_INCLUDE_DIR} "/usr/include")
+set(ENV{DEPS_LIBRARY_DIR} "/usr/lib/x86_64-linux-gnu")
+
+# libmpv
+set(ENV{LIBMPV_NAME} "mpv")
+
 # fmt cmake config dir
 set(ENV{FMT_CMAKE_PATH} "${VCPKG_SHARE_PATH}/fmt")
 
@@ -71,4 +78,3 @@ set(ENV{PKGCONF_CFG_PATH} "$ENV{VCPKG_LIB_PATH}/pkgconfig")
 # output dir
 set(ENV{INSTALL_EXE_DIR} "${ROOT_DIR}/rundir/$ENV{TRIPLET}")
 set(ENV{OUTPUT_EXE_DIR} "${ROOT_DIR}/output/$ENV{TRIPLET}")
-

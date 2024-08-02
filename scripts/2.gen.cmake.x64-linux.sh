@@ -10,5 +10,3 @@ cmake                                                                           
     -C scripts/1.cfg.cmake.x64-linux.txt                                                 \
     -B build/x64-linux                                                                   \
     -Wno-dev                                                                             \
-    -DOPENSSL_ROOT_DIR="/mnt/d/__develop__/vcpkg/installed/x64-linux"                    \
-    -DOPENSSL_LIBRARIES="/mnt/d/__develop__/vcpkg/installed/x64-linux/lib"

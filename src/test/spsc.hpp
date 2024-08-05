@@ -111,7 +111,7 @@ public:
 
 	uint32_t buffer_size()
 	{
-		return (uint32_t)m_ring_buffer.buffer_size();
+		return (uint32_t)m_ring_buffer.size();
 	}
 
 	bool is_buffer_null()
@@ -147,7 +147,7 @@ public:
 
 	uint32_t put(const std::vector<T> &input_buffer)
 	{
-		return put(input_buffer.data(), (uint32_t)input_buffer.buffer_size());
+		return put(input_buffer.data(), (uint32_t)input_buffer.size());
 	}
 
 	uint32_t put_if_not_full(const T *input_buffer, uint32_t length)

@@ -10,12 +10,13 @@
 
 // libmpv
 struct mpv_handle;
+struct mpv_event_log_message;
 
 
 
 class MpvWrapper {
 public:
-	MpvWrapper(uint32_t buffer_size = 2 * 1024 * 1024);
+	MpvWrapper(uint32_t buffer_size = 4 * 1024 * 1024);
 	virtual ~MpvWrapper();
 
 	// start player
@@ -119,6 +120,18 @@ protected:
 	// show/hide container window
 	void set_container_window_visiable(bool state);
 
+	// restart when the codec was changed
+	bool restart_codec_changed(struct mpv_event_log_message *msg);
+
+	// get decoded resolution
+	bool get_decoded_resolution(struct mpv_event_log_message *msg);
+
+	// estimate bitrate
+	void estimate_bitrate(uint32_t length);
+
+	// fast speed to reduce latency
+	void reduce_latency();
+
 
 private:
 	// flag to break infinite loop
@@ -133,6 +146,14 @@ private:
 	std::chrono::steady_clock::time_point m_last_bitrate_update_time;
 	// estimated bitrate
 	uint32_t m_estimated_bitrate;
+	// min bitrate according to resolution
+	uint32_t m_min_bitrate;
+	// estimate speed
+	double m_estimated_speed;
+	// video width
+	uint32_t m_width;
+	// video height
+	uint32_t m_height;
 	// player's parent window id
 	int64_t m_container_wid;
 	// mix cpu and gpu for decoding

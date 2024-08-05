@@ -99,6 +99,9 @@ MpvWrapper::MpvWrapper(uint32_t buffer_size)
 	, m_mix_cpu_gpu_use(false)
 	, m_input_size_2s(0)
 	, m_estimated_bitrate(0)
+	, m_min_bitrate(0)
+	, m_width(0)
+	, m_height(0)
 {
 }
 
@@ -139,6 +142,10 @@ bool MpvWrapper::start(
 		}
 	}
 	index.store(i + 1, std::memory_order_relaxed);
+
+	m_width = 0;
+	m_height = 0;
+	m_estimated_speed = 1.0;
 
 	do {
 		setlocale(LC_NUMERIC, "C");
@@ -248,6 +255,9 @@ void MpvWrapper::stop()
 	}
 	m_mpv_context = nullptr;
 
+	m_width = 0;
+	m_height = 0;
+
 	if (m_is_restarting) {
 		return;
 	}
@@ -296,18 +306,10 @@ bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
 	}
 
 	// estimate bitrate
-	m_input_size_2s += length;
-	auto now = std::chrono::steady_clock::now();
-	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_bitrate_update_time).count();
-	if (ms > 2000) {
-		double speed = std::ceil(get_fps() / 25.0);
-		if (speed < 1.0) {
-			speed = 1.0;
-		}
-		m_estimated_bitrate = (uint64_t)std::round(m_input_size_2s * 1000.0 / ms / speed);
-		m_input_size_2s = 0;
-		m_last_bitrate_update_time = now;
-	}
+	estimate_bitrate(length);
+
+	// ajust speed
+	reduce_latency();
 
 	return true;
 }
@@ -367,6 +369,12 @@ void MpvWrapper::set_volume(const int v)
 
 bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
 {
+	if (m_width > 0 && m_height > 0) {
+		width = m_width;
+		height = height;
+		return true;
+	}
+
 	bool r1 = get_property("width", width);
 	bool r2 = get_property("height", height);
 	return r1 && r2;
@@ -389,10 +397,13 @@ bool MpvWrapper::set_speed(double v)
 
 int MpvWrapper::get_bitrate()
 {
-	//int64_t v = 0;
-	//bool r = get_property("video-bitrate", v);
-	//return (int)v;
-	return m_estimated_bitrate;
+	if (m_estimated_bitrate > 0) {
+		return m_estimated_bitrate;
+	}
+
+	int64_t v = 0;
+	bool r = get_property("video-bitrate", v);
+	return (int)v;
 }
 
 
@@ -499,17 +510,17 @@ void MpvWrapper::pool_events()
 					break;
 				}
 				else if (event->event_id == MPV_EVENT_LOG_MESSAGE && event->data != nullptr) {
+					// log message
 					struct mpv_event_log_message *msg = (struct mpv_event_log_message *)event->data;
 					SPDLOG_INFO("[*MPV*] [{}] [{}] {}", msg->prefix, msg->level, msg->text);
-					bool restart = msg->prefix != nullptr && msg->text != nullptr
-						&& msg->log_level >= MPV_LOG_LEVEL_WARN
-						&& strstr(msg->prefix, "ffmpeg/video") != 0
-						&& strstr(msg->text, "data partitioning is not implemented") != 0;
-					if (restart && !m_is_restarting) {
-						m_is_restarting.store(true);
-						stop();
-						start(m_container_wid, m_mix_cpu_gpu_use, m_video_url, m_profile, m_vo, m_hwdec, m_gpu_api, m_gpu_context, m_log_level);
-						m_is_restarting.store(false);
+
+					// restart when the codec was changed
+					if (restart_codec_changed(msg)) {
+					}
+					else {
+						// get video width and height
+						if (get_decoded_resolution(msg)) {
+						}
 					}
 				}
 			}
@@ -720,5 +731,121 @@ void MpvWrapper::set_container_window_visiable(bool state)
 	}
 	XFlush(display);
 #endif
+}
+
+
+bool MpvWrapper::restart_codec_changed(struct mpv_event_log_message *msg)
+{
+	if (
+		!m_is_restarting
+		&& msg->text != nullptr
+		&& msg->log_level >= MPV_LOG_LEVEL_WARN
+		&& strstr(msg->prefix, "ffmpeg/video") != nullptr
+		&& strstr(msg->text, "data partitioning is not implemented") != nullptr
+		) {
+		m_is_restarting.store(true);
+		stop();
+		start(m_container_wid, m_mix_cpu_gpu_use, m_video_url, m_profile, m_vo, m_hwdec, m_gpu_api, m_gpu_context, m_log_level);
+		m_is_restarting.store(false);
+
+		return true;
+	}
+
+	return false;
+}
+
+
+bool MpvWrapper::get_decoded_resolution(struct mpv_event_log_message *msg)
+{
+	// msg->text = Decoder format: 1920x1080 [0:1] d3d11[nv12] auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1920x1080+0+0
+	if (0 == m_width && 0 == m_height && msg->text != nullptr && strstr(msg->text, "Decoder format:") != 0) {
+		char *ptr = (char *)strchr(msg->text, 'x');
+		*ptr = '\0';
+		m_width = atoi(strrchr(msg->text, ':') + 2);
+		m_height = atoi(ptr + 1);
+
+		if (m_width * m_height >= 3840 * 2160) {
+			m_min_bitrate = 1600 * 1024 / 4;
+		}
+		else if (m_width * m_height >= 2560 * 1440) {
+			m_min_bitrate = 800 * 1024 / 4;
+		}
+		else if (m_width * m_height >= 1920 * 1080) {
+			m_min_bitrate = 400 * 1024 / 4;
+		}
+		else if (m_width * m_height >= 1280 * 720) {
+			m_min_bitrate = 200 * 1024 / 4;
+		}
+		else {
+			m_min_bitrate = 100 * 1024 / 4;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+
+void MpvWrapper::estimate_bitrate(uint32_t length)
+{
+	m_input_size_2s += length;
+	auto now = std::chrono::steady_clock::now();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_bitrate_update_time).count();
+	if (ms > 2000) {
+		m_estimated_speed = std::ceil(get_fps() / 25.0);
+		if (m_estimated_speed < 1.0) {
+			m_estimated_speed = 1.0;
+		}
+		m_estimated_bitrate = (uint64_t)std::round(m_input_size_2s * 1000.0 / ms / m_estimated_speed);
+		m_input_size_2s = 0;
+		m_last_bitrate_update_time = now;
+	}
+}
+
+
+void MpvWrapper::reduce_latency()
+{
+	// refer: https://www.infoq.cn/article/s2zh7b2p0v1xtzvxyavv
+
+	int bitrate = get_bitrate();
+	if (bitrate <= 0) {
+		return;
+	}
+
+	double lag_seconds = (double)m_spsc.buffer_size() / bitrate;
+	if (lag_seconds < 6) {
+		return;
+	}
+
+	double speed = 1.0;
+	bool speeding_up = false;
+	if (lag_seconds >= 12 && bitrate >= m_min_bitrate) {
+		speed = 2.0;
+		speeding_up = true;
+	}
+	else if (lag_seconds >= 10 && bitrate >= m_min_bitrate) {
+		speed = 1.8;
+		speeding_up = true;
+	}
+	else if (lag_seconds >= 8 && bitrate >= m_min_bitrate) {
+		speed = 1.6;
+		speeding_up = true;
+	}
+	else if (lag_seconds >= 6 && bitrate >= m_min_bitrate) {
+		speed = 1.4;
+		speeding_up = true;
+	}
+
+	if (speeding_up) {
+		if (m_estimated_speed < speed && speed != get_speed()) {
+			set_speed(speed);
+		}
+	}
+	else {
+		if (m_estimated_speed != get_speed()) {
+			set_speed(m_estimated_speed);
+		}
+	}
 }
 

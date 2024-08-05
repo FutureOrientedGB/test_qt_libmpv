@@ -8,6 +8,7 @@
 // spdlog
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/pattern_formatter.h>
 
 // cli11
 #include <CLI/CLI.hpp>
@@ -22,7 +23,7 @@
 class CommandArguments {
 public:
     CommandArguments()
-        : log_path("test_qt_libmpv.log")
+        : log_path("qt-mpv.log")
         , log_level((int)spdlog::level::info)
         , ways(1)
         , mix_cpu_gpu_use(false)
@@ -32,7 +33,6 @@ public:
         , gpu_api("")
         , gpu_context("")
         , mpv_log_level("v")
-        , mpv_log_path("mpv.log")
         , window_left_pos(0)
         , window_top_pos(0)
         , window_width(800)
@@ -53,7 +53,6 @@ public:
         app.add_option("--gpu_api", gpu_api, "mpv gpu-api");
         app.add_option("--gpu_context", gpu_context, "mpv gpu-context");
         app.add_option("--mpv_log_level", mpv_log_level, "mpv log level (default verbose)");
-        app.add_option("--mpv_log_path", mpv_log_path, "mpv log path (default mpv.*.log)");
         app.add_option("--window_left_pos", window_left_pos, fmt::format("window left position (default {})", window_left_pos));
         app.add_option("--window_top_pos", window_top_pos, fmt::format("window left position (default {})", window_top_pos));
         app.add_option("--window_width", window_width, fmt::format("window width (default {})", window_width));
@@ -71,7 +70,6 @@ public:
     std::string gpu_api;
     std::string gpu_context;
     std::string mpv_log_level;
-    std::string mpv_log_path;
     int window_left_pos;
     int window_top_pos;
     int window_width;
@@ -81,35 +79,36 @@ public:
 
 int main(int argc, char** argv) {
     // parse cli
-    CLI::App app("test_qt_libmpv");
+    CLI::App app("qt-mpv");
     CommandArguments args;
     args.add_options(app);
     CLI11_PARSE(app, argc, argv);
 
     // init log
-    auto file_logger = spdlog::basic_logger_mt("test_qt_libmpv", args.log_path);
+    auto file_logger = spdlog::basic_logger_mt("qt-mpv", args.log_path);
+    auto no_eof_formatter = std::make_unique<spdlog::pattern_formatter>("[%Y-%m-%d %H:%M:%S.%e] [%l] [%s L%# P%P T%t] %v", spdlog::pattern_time_type::local, std::string(""));  // disable eol
+    file_logger->set_formatter(std::move(no_eof_formatter));
     spdlog::set_default_logger(file_logger);
     spdlog::set_level((spdlog::level::level_enum)args.log_level);
     spdlog::flush_on((spdlog::level::level_enum)args.log_level);
 
     if (args.video_url.empty()) {
-        SPDLOG_ERROR("empty video_url not allowed");
+        SPDLOG_ERROR("empty video_url not allowed\n");
         return -1;
     }
 
     QApplication qt_app(argc, argv);
-    qt_app.setApplicationName("test_qt_libmpv");
+    qt_app.setApplicationName("qt-mpv");
 
     WindowWrapper w;
-    w.setWindowTitle(QString("test qt libmpv (%1)").arg(QString::fromStdString(args.video_url)));
+    w.setWindowTitle(QString("qt-mpv %1").arg(QString::fromStdString(args.video_url)));
     w.setGeometry(args.window_left_pos, args.window_top_pos, args.window_width, args.window_height);
     w.show();
 
-    if (!w.create_players(args.ways, args.mix_cpu_gpu_use, args.video_url, args.profile, args.vo, args.hwdec, args.gpu_api, args.gpu_context, args.mpv_log_level, args.mpv_log_path)) {
-        SPDLOG_ERROR("create_players error");
+    if (!w.create_players(args.ways, args.mix_cpu_gpu_use, args.video_url, args.profile, args.vo, args.hwdec, args.gpu_api, args.gpu_context, args.mpv_log_level)) {
+        SPDLOG_ERROR("create_players error\n");
         return -2;
     }
-
 
     return qt_app.exec();
 }

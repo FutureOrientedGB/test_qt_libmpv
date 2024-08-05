@@ -22,10 +22,13 @@ public:
 		int64_t container_wid, bool mix_cpu_gpu_use = false, std::string video_url = "",
 		std::string profile = "low-latency", std::string vo = "gpu",
 		std::string hwdec = "auto", std::string gpu_api = "auto",
-		std::string gpu_context = "auto", std::string log_level = "v", std::string log_path = ""
+		std::string gpu_context = "auto", std::string log_level = "v"
 	);
 	// stop player
 	void stop();
+
+	// restart player
+	void restart();
 
 	// break infinite loop
 	void stopping();
@@ -62,10 +65,20 @@ public:
 
 	// get speed
 	double get_speed();
+	// set speed
 	bool set_speed(double v);
+
+	// get bitrate
+	int get_bitrate();
+	
+	// get fps
+	int get_fps();
 
 	// take screenshot from video
 	bool screenshot(std::string &path);
+
+	// poll events
+	void pool_events();
 
 
 protected:
@@ -77,6 +90,9 @@ protected:
 
 	// wrap mpv_stream_cb_add_ro to register custom stream protocol
 	bool register_stream_callbacks();
+
+	// wrap mpv_set_wakeup_callback to handle events
+	void register_event_callback();
 
 	// wrap mpv_request_log_messages to set log level
 	bool set_log_level(std::string min_level);
@@ -109,10 +125,28 @@ protected:
 private:
 	// flag to break infinite loop
 	bool m_stopping;
+	// is restarting
+	std::atomic<bool> m_is_restarting;
 	// mpv handle ctx
 	mpv_handle *m_mpv_context;
 	// player's parent window id
 	int64_t m_container_wid;
+	// mix cpu and gpu for decoding
+	bool m_mix_cpu_gpu_use;
+	// video to play
+	std::string m_video_url;
+	// mpv profile option
+	std::string m_profile;
+	// mpv vo option
+	std::string m_vo;
+	// mpv hwdec option
+	std::string m_hwdec;
+	// mpv gpu-api option
+	std::string m_gpu_api;
+	// mpv gpu-context option
+	std::string m_gpu_context;
+	// mpv log level
+	std::string m_log_level;
 	// spsc size
 	uint32_t m_buffer_size;
 	// spsc

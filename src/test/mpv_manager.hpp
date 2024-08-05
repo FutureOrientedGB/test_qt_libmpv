@@ -28,8 +28,8 @@ public:
 
 	bool start_players(
 		std::map<int, QWidget *> &containers, bool mix_cpu_gpu_use, std::string video_url,
-		std::string profile, std::string vo, std::string hwdec, std::string gpu_api,
-		std::string gpu_context, std::string log_level, std::string log_path
+		std::string profile, std::string vo, std::string hwdec,
+		std::string gpu_api, std::string gpu_context, std::string log_level
 	);
 	void stop_players();
 

@@ -45,8 +45,8 @@ MpvManager::~MpvManager()
 
 bool create_mpv_player(
 	uint32_t buffer_size, int index, int64_t wid, std::map<int, MpvWrapper *> &index_to_mpv,
-	bool mix_cpu_gpu_use, std::string video_url, std::string profile, std::string vo, std::string hwdec,
-	std::string gpu_api, std::string gpu_context, std::string log_level, std::string log_path
+	bool mix_cpu_gpu_use, std::string video_url, std::string profile, std::string vo,
+	std::string hwdec, std::string gpu_api, std::string gpu_context, std::string log_level
 )
 {
 	MpvWrapper *mpv = new MpvWrapper(buffer_size);
@@ -56,14 +56,14 @@ bool create_mpv_player(
 
 	index_to_mpv.insert(std::make_pair(index, mpv));
 
-	return mpv->start(wid, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path);
+	return mpv->start(wid, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level);
 }
 
 
 bool MpvManager::start_players(
 	std::map<int, QWidget *> &containers, bool mix_cpu_gpu_use, std::string video_url,
-	std::string profile, std::string vo, std::string hwdec, std::string gpu_api,
-	std::string gpu_context, std::string log_level, std::string log_path
+	std::string profile, std::string vo, std::string hwdec,
+	std::string gpu_api, std::string gpu_context, std::string log_level
 )
 {
 	if (containers.empty()) {
@@ -72,7 +72,7 @@ bool MpvManager::start_players(
 
 	for (auto iter = containers.begin(); iter != containers.end(); iter++) {
 		int index = iter->first;
-		if (!create_mpv_player(m_buffer_size, index, (int64_t)iter->second->winId(), m_index_to_mpv_wrapper, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level, log_path)) {
+		if (!create_mpv_player(m_buffer_size, index, (int64_t)iter->second->winId(), m_index_to_mpv_wrapper, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level)) {
 			stop_players();
 			return false;
 		}

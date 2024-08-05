@@ -1,6 +1,7 @@
 #pragma once
 
 // c++
+#include <chrono>
 #include <map>
 #include <string>
 
@@ -14,7 +15,7 @@ struct mpv_handle;
 
 class MpvWrapper {
 public:
-	MpvWrapper(uint32_t buffer_size = 1024 * 1024);
+	MpvWrapper(uint32_t buffer_size = 2 * 1024 * 1024);
 	virtual ~MpvWrapper();
 
 	// start player
@@ -26,9 +27,6 @@ public:
 	);
 	// stop player
 	void stop();
-
-	// restart player
-	void restart();
 
 	// break infinite loop
 	void stopping();
@@ -129,6 +127,12 @@ private:
 	std::atomic<bool> m_is_restarting;
 	// mpv handle ctx
 	mpv_handle *m_mpv_context;
+	// input size in one second
+	uint32_t m_input_size_2s;
+	// last bitrate update time
+	std::chrono::steady_clock::time_point m_last_bitrate_update_time;
+	// estimated bitrate
+	uint32_t m_estimated_bitrate;
 	// player's parent window id
 	int64_t m_container_wid;
 	// mix cpu and gpu for decoding

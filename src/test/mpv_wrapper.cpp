@@ -96,6 +96,9 @@ MpvWrapper::MpvWrapper(uint32_t buffer_size)
 	, m_mpv_context(nullptr)
 	, m_container_wid(0)
 	, m_buffer_size(buffer_size)
+	, m_mix_cpu_gpu_use(false)
+	, m_input_size_2s(0)
+	, m_estimated_bitrate(0)
 {
 }
 
@@ -220,6 +223,8 @@ bool MpvWrapper::start(
 		m_stopping = false;
 		m_is_restarting.store(false);
 
+		m_last_bitrate_update_time = std::chrono::steady_clock::now();
+
 		m_container_wid = container_wid;
 		set_container_window_visiable(true);
 
@@ -290,6 +295,20 @@ bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
 		}
 	}
 
+	// estimate bitrate
+	m_input_size_2s += length;
+	auto now = std::chrono::steady_clock::now();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_bitrate_update_time).count();
+	if (ms > 2000) {
+		double speed = std::ceil(get_fps() / 25.0);
+		if (speed < 1.0) {
+			speed = 1.0;
+		}
+		m_estimated_bitrate = (uint64_t)std::round(m_input_size_2s * 1000.0 / ms / speed);
+		m_input_size_2s = 0;
+		m_last_bitrate_update_time = now;
+	}
+
 	return true;
 }
 
@@ -357,7 +376,7 @@ bool MpvWrapper::get_resolution(int64_t &width, int64_t &height)
 double MpvWrapper::get_speed()
 {
 	double r;
-	return get_property("speed", r);
+	get_property("speed", r);
 	return r;
 }
 
@@ -370,17 +389,18 @@ bool MpvWrapper::set_speed(double v)
 
 int MpvWrapper::get_bitrate()
 {
-	int64_t v;
-	bool r = get_property("video-bitrate", v);
-	return (int)v;
+	//int64_t v = 0;
+	//bool r = get_property("video-bitrate", v);
+	//return (int)v;
+	return m_estimated_bitrate;
 }
 
 
 int MpvWrapper::get_fps()
 {
-	int64_t v;
-	bool r = get_property(" estimated-vf-fps", v);
-	return (int)v;
+	int64_t v = 0;
+	bool r = get_property("estimated-vf-fps", v);
+	return v >= 0 ? (int)v : 25;
 }
 
 

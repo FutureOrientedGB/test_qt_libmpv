@@ -30,8 +30,6 @@ MpvManager::MpvManager(uint32_t buffer_size)
 
 MpvManager::~MpvManager()
 {
-	stop_players();
-
 	if (m_read_file_thread != nullptr) {
 		if (m_read_file_thread->joinable()) {
 			m_read_file_thread->join();
@@ -39,6 +37,8 @@ MpvManager::~MpvManager()
 		delete m_read_file_thread;
 	}
 	m_read_file_thread = nullptr;
+
+	stop_players();
 }
 
 

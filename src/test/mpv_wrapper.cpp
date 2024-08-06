@@ -11,6 +11,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 // libmpv
 #include <mpv/client.h>
@@ -83,23 +84,18 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 }
 
 
-void event_fn(void *user_data)
-{
-	auto thiz = (MpvWrapper *)user_data;
-	thiz->pool_events();
-}
-
-
 MpvWrapper::MpvWrapper(uint32_t buffer_size)
 	: m_stopping(false)
 	, m_is_restarting(false)
 	, m_mpv_context(nullptr)
+	, m_event_thread(nullptr)
 	, m_container_wid(0)
 	, m_buffer_size(buffer_size)
 	, m_mix_cpu_gpu_use(false)
 	, m_input_size_2s(0)
 	, m_estimated_bitrate(0)
 	, m_min_bitrate(0)
+	, m_estimated_speed(1.0)
 	, m_width(0)
 	, m_height(0)
 {
@@ -202,12 +198,12 @@ bool MpvWrapper::start(
 			break;
 		}
 
+		m_event_thread = new std::thread(pool_events, this);
+
 		m_spsc.reset(m_buffer_size);
 		if (m_spsc.is_buffer_null()) {
 			break;
 		}
-
-		register_event_callback();
 
 		std::ifstream file(video_url);
 		if (!video_url.empty() && !file.good()) {
@@ -249,6 +245,14 @@ void MpvWrapper::stop()
 	m_stopping = true;
 
 	m_spsc.stopping();
+
+	if (m_event_thread != nullptr) {
+		if (m_event_thread->joinable()) {
+			m_event_thread->join();
+		}
+		delete m_event_thread;
+	}
+	m_event_thread = nullptr;
 
 	if (m_mpv_context != nullptr) {
 		mpv_terminate_destroy(m_mpv_context);
@@ -493,49 +497,49 @@ bool MpvWrapper::register_stream_callbacks()
 }
 
 
-void MpvWrapper::register_event_callback()
+void MpvWrapper::pool_events(void *ptr)
 {
-	mpv_set_wakeup_callback(m_mpv_context, event_fn, this);
-}
-
-
-void MpvWrapper::pool_events()
-{
-	std::thread thread(
-		[this]() {
-			while (!m_stopping) {
-				mpv_event *event = mpv_wait_event(m_mpv_context, 0);
-
-				if (event->event_id == MPV_EVENT_NONE) {
-					break;
-				}
-				else if (event->event_id == MPV_EVENT_LOG_MESSAGE && event->data != nullptr) {
-					// log message
-					struct mpv_event_log_message *msg = (struct mpv_event_log_message *)event->data;
-					SPDLOG_INFO("[*MPV*] [{}] [{}] {}", msg->prefix, msg->level, msg->text);
-
-					// restart when the codec was changed
-					if (restart_codec_changed(msg)) {
-					}
-					else {
-						// get video width and height
-						if (get_decoded_resolution(msg)) {
-						}
-					}
-				}
-			}
-
-			std::ostringstream oss;
-			oss << std::this_thread::get_id() << std::endl;
-			SPDLOG_INFO("[*MPV*] [mpv_wrapper] pool_events end, thread: {}", oss.str());
-		}
-	);
+	if (nullptr == ptr) {
+		return;
+	}
 
 	std::ostringstream oss;
-	oss << thread.get_id() << std::endl;
-	SPDLOG_INFO("[*MPV*] [mpv_wrapper] pool_events begin, thread: {}", oss.str());
+	oss << std::this_thread::get_id() << std::endl;
+	SPDLOG_INFO("[mpv_wrapper] pool_events begin, thread: {}", oss.str());
 
-	thread.detach();
+	MpvWrapper *thiz = (MpvWrapper *)ptr;
+	while (thiz != nullptr && !thiz->m_stopping && thiz->m_mpv_context != nullptr) {
+		mpv_event *event = mpv_wait_event(thiz->m_mpv_context, 16);
+		if (nullptr == event) {
+			continue;
+		}
+
+		if (event->event_id == MPV_EVENT_NONE) {
+			continue;
+		}
+
+		if (event->event_id == MPV_EVENT_LOG_MESSAGE) {
+			struct mpv_event_log_message *msg = event->data != nullptr ? (struct mpv_event_log_message *)event->data : nullptr;
+			if (nullptr == msg || nullptr == msg->prefix || nullptr == msg->text) {
+				continue;
+			}
+			// log message
+			SPDLOG_INFO("[libmpv] [{}] [{}] {}", msg->prefix, msg->level, msg->text);
+
+			if (thiz->restart_codec_changed(msg)) {
+				SPDLOG_INFO("restart when the codec was changed\n");
+				continue;
+			}
+			if (thiz->get_decoded_resolution(msg)) {
+				SPDLOG_INFO("get video width ({}) and height ({})\n", thiz->m_width, thiz->m_height);
+				continue;
+			}
+		}
+	}
+
+	oss.clear();
+	oss << std::this_thread::get_id() << std::endl;
+	SPDLOG_INFO("[mpv_wrapper] pool_events end, thread: {}", oss.str());
 }
 
 
@@ -736,13 +740,7 @@ void MpvWrapper::set_container_window_visiable(bool state)
 
 bool MpvWrapper::restart_codec_changed(struct mpv_event_log_message *msg)
 {
-	if (
-		!m_is_restarting
-		&& msg->text != nullptr
-		&& msg->log_level >= MPV_LOG_LEVEL_WARN
-		&& strstr(msg->prefix, "ffmpeg/video") != nullptr
-		&& strstr(msg->text, "data partitioning is not implemented") != nullptr
-		) {
+	if (msg->log_level <= MPV_LOG_LEVEL_WARN && strstr(msg->prefix, "ffmpeg/video") != nullptr && strstr(msg->text, "data partitioning is not implemented") != nullptr) {
 		m_is_restarting.store(true);
 		stop();
 		start(m_container_wid, m_mix_cpu_gpu_use, m_video_url, m_profile, m_vo, m_hwdec, m_gpu_api, m_gpu_context, m_log_level);
@@ -757,13 +755,20 @@ bool MpvWrapper::restart_codec_changed(struct mpv_event_log_message *msg)
 
 bool MpvWrapper::get_decoded_resolution(struct mpv_event_log_message *msg)
 {
-	// msg->text = Decoder format: 1920x1080 [0:1] d3d11[nv12] auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1920x1080+0+0
-	if (0 == m_width && 0 == m_height && msg->text != nullptr && strstr(msg->text, "Decoder format:") != 0) {
-		char *ptr = (char *)strchr(msg->text, 'x');
-		*ptr = '\0';
-		m_width = atoi(strrchr(msg->text, ':') + 2);
-		m_height = atoi(ptr + 1);
+	const char *pattern = nullptr;
 
+	// msg->text = Decoder format: 1920x1080 [0:1] d3d11[nv12] auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1920x1080+0+0
+	if ((pattern = strstr(msg->text, "Decoder format: ")) != nullptr) {
+		m_width = atoi(pattern + 16);
+		m_height = atoi(strchr(pattern, 'x') + 1);
+	}
+	// [vo/gpu] reconfig to 720x480 yuv420p bt.601/bt.601-525/bt.1886/limited/display CL=mpeg2/4/h264 crop=720x480+0+0
+	else if ((pattern = strstr(msg->text, "reconfig to ")) != nullptr) {
+		m_width = atoi(pattern + 12);
+		m_height = atoi(strchr(pattern, 'x') + 1);
+	}
+
+	if (pattern != nullptr) {
 		if (m_width * m_height >= 3840 * 2160) {
 			m_min_bitrate = 1600 * 1024 / 4;
 		}

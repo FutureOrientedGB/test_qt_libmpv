@@ -54,7 +54,10 @@ public:
 		: m_stopping(false)
 		, m_input_offset(0)
 		, m_output_offset(0)
-
+		, m_last_full_log_time(std::chrono::steady_clock::now())
+		, m_last_full_log_repeat_times(0)
+		, m_last_empty_log_time(std::chrono::steady_clock::now())
+		, m_last_empty_log_repeat_times(0)
 	{
 	}
 

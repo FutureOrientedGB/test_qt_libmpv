@@ -77,7 +77,7 @@ public:
 	bool screenshot(std::string &path);
 
 	// poll events
-	void pool_events();
+	static void pool_events(void *ptr);
 
 
 protected:
@@ -89,9 +89,6 @@ protected:
 
 	// wrap mpv_stream_cb_add_ro to register custom stream protocol
 	bool register_stream_callbacks();
-
-	// wrap mpv_set_wakeup_callback to handle events
-	void register_event_callback();
 
 	// wrap mpv_request_log_messages to set log level
 	bool set_log_level(std::string min_level);
@@ -140,6 +137,8 @@ private:
 	std::atomic<bool> m_is_restarting;
 	// mpv handle ctx
 	mpv_handle *m_mpv_context;
+	// event thread
+	std::thread *m_event_thread;
 	// input size in one second
 	uint32_t m_input_size_2s;
 	// last bitrate update time

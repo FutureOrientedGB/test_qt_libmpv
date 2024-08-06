@@ -84,14 +84,17 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 }
 
 
+std::atomic<uint16_t> MpvWrapper::s_index = 0;
+
+
 MpvWrapper::MpvWrapper(uint32_t buffer_size)
-	: m_stopping(false)
+	: m_id(0)
+	, m_stopping(false)
 	, m_is_restarting(false)
 	, m_mpv_context(nullptr)
 	, m_event_thread(nullptr)
 	, m_container_wid(0)
 	, m_buffer_size(buffer_size)
-	, m_mix_cpu_gpu_use(false)
 	, m_input_size_2s(0)
 	, m_estimated_bitrate(0)
 	, m_min_bitrate(0)
@@ -109,13 +112,12 @@ MpvWrapper::~MpvWrapper()
 
 
 bool MpvWrapper::start(
-	int64_t container_wid, bool mix_cpu_gpu_use, std::string video_url,
+	int64_t container_wid, std::string video_url,
 	std::string profile, std::string vo, std::string hwdec,
 	std::string gpu_api, std::string gpu_context, std::string log_level
 )
 {
 	// record options
-	m_mix_cpu_gpu_use = mix_cpu_gpu_use;
 	m_video_url = video_url;
 	m_profile = profile;
 	m_vo = vo;
@@ -125,19 +127,9 @@ bool MpvWrapper::start(
 	m_log_level = log_level;
 
 	// auto-incrementing index
-	static std::atomic<uint16_t> index = 0;
-	uint16_t i = index.load(std::memory_order_acquire);
-	if (0 == i % 2) {
-		if (mix_cpu_gpu_use) {
-			hwdec = "auto";  // even index: use gpu
-		}
+	if (!m_is_restarting) {
+		m_id = s_index++;
 	}
-	else {
-		if (mix_cpu_gpu_use) {
-			hwdec = "";  // odd index: use cpu
-		}
-	}
-	index.store(i + 1, std::memory_order_relaxed);
 
 	m_width = 0;
 	m_height = 0;
@@ -198,7 +190,7 @@ bool MpvWrapper::start(
 			break;
 		}
 
-		m_event_thread = new std::thread(pool_events, this);
+		m_event_thread = new std::thread(poll_events, this);
 
 		m_spsc.reset(m_buffer_size);
 		if (m_spsc.is_buffer_null()) {
@@ -248,7 +240,12 @@ void MpvWrapper::stop()
 
 	if (m_event_thread != nullptr) {
 		if (m_event_thread->joinable()) {
-			m_event_thread->join();
+			if (m_is_restarting) {
+				m_event_thread->detach();
+			}
+			else {
+				m_event_thread->join();
+			}
 		}
 		delete m_event_thread;
 	}
@@ -269,7 +266,6 @@ void MpvWrapper::stop()
 	set_container_window_visiable(false);
 	m_container_wid = 0;
 
-	m_mix_cpu_gpu_use = false;
 	m_video_url.clear();
 	m_profile.clear();
 	m_vo.clear();
@@ -296,7 +292,11 @@ bool MpvWrapper::is_buffer_null()
 
 bool MpvWrapper::write(const uint8_t *buf, uint32_t length)
 {
-	if (m_stopping && !m_is_restarting) {
+	while (m_is_restarting) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+
+	if (m_stopping) {
 		return false;
 	}
 
@@ -468,7 +468,7 @@ bool MpvWrapper::create_handle()
 {
 	m_mpv_context = mpv_create();
 	if (nullptr == m_mpv_context) {
-		SPDLOG_ERROR("mpv_create() error\n");
+		SPDLOG_ERROR("[mpv {}] mpv_create() error\n", m_id);
 		return false;
 	}
 	return true;
@@ -479,7 +479,7 @@ bool MpvWrapper::initialize_handle()
 {
 	int code = mpv_initialize(m_mpv_context);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_initialize({}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_initialize({}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -490,56 +490,10 @@ bool MpvWrapper::register_stream_callbacks()
 {
 	int code = mpv_stream_cb_add_ro(m_mpv_context, "myprotocol", (void *)this, open_fn);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_stream_cb_add_ro({}, myprotocol, {}, open_fn) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), code, mpv_error_string(code));
 		return false;
 	}
 	return true;
-}
-
-
-void MpvWrapper::pool_events(void *ptr)
-{
-	if (nullptr == ptr) {
-		return;
-	}
-
-	std::ostringstream oss;
-	oss << std::this_thread::get_id() << std::endl;
-	SPDLOG_INFO("[mpv_wrapper] pool_events begin, thread: {}", oss.str());
-
-	MpvWrapper *thiz = (MpvWrapper *)ptr;
-	while (thiz != nullptr && !thiz->m_stopping && thiz->m_mpv_context != nullptr) {
-		mpv_event *event = mpv_wait_event(thiz->m_mpv_context, 16);
-		if (nullptr == event) {
-			continue;
-		}
-
-		if (event->event_id == MPV_EVENT_NONE) {
-			continue;
-		}
-
-		if (event->event_id == MPV_EVENT_LOG_MESSAGE) {
-			struct mpv_event_log_message *msg = event->data != nullptr ? (struct mpv_event_log_message *)event->data : nullptr;
-			if (nullptr == msg || nullptr == msg->prefix || nullptr == msg->text) {
-				continue;
-			}
-			// log message
-			SPDLOG_INFO("[libmpv] [{}] [{}] {}", msg->prefix, msg->level, msg->text);
-
-			if (thiz->restart_codec_changed(msg)) {
-				SPDLOG_INFO("restart when the codec was changed\n");
-				continue;
-			}
-			if (thiz->get_decoded_resolution(msg)) {
-				SPDLOG_INFO("get video width ({}) and height ({})\n", thiz->m_width, thiz->m_height);
-				continue;
-			}
-		}
-	}
-
-	oss.clear();
-	oss << std::this_thread::get_id() << std::endl;
-	SPDLOG_INFO("[mpv_wrapper] pool_events end, thread: {}", oss.str());
 }
 
 
@@ -547,7 +501,7 @@ bool MpvWrapper::set_log_level(std::string min_level)
 {
 	int code = mpv_request_log_messages(m_mpv_context, min_level.c_str());
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_request_log_messages({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), min_level, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_request_log_messages({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), min_level, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -576,7 +530,7 @@ bool MpvWrapper::call_command(std::vector<std::string> args)
 	delete[] cmd;
 
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_command({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), fmt::join(args, ", "), code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_command({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), fmt::join(args, ", "), code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -588,7 +542,7 @@ bool MpvWrapper::set_option(std::string key, bool value)
 	int v = value ? 1 : 0;
 	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_FLAG, &v);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_option_flag({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_option_flag({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -599,7 +553,7 @@ bool MpvWrapper::set_option(std::string key, int64_t value)
 {
 	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_INT64, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_option_int64({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_option_int64({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -610,7 +564,7 @@ bool MpvWrapper::set_option(std::string key, double value)
 {
 	int code = mpv_set_option(m_mpv_context, key.c_str(), MPV_FORMAT_DOUBLE, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_option_double({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_option_double({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -621,7 +575,7 @@ bool MpvWrapper::set_option(std::string key, std::string value)
 {
 	int code = mpv_set_option_string(m_mpv_context, key.c_str(), value.c_str());
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_option_string({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_option_string({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -633,7 +587,7 @@ bool MpvWrapper::get_property(std::string key, bool &value)
 	int v;
 	int code = mpv_get_property(m_mpv_context, key.c_str(), MPV_FORMAT_FLAG, &v);
 	if (code < 0) {
-		SPDLOG_ERROR("get_property_flag({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] get_property_flag({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
 		return false;
 	}
 	value = 1 == v ? true : false;
@@ -645,7 +599,7 @@ bool MpvWrapper::get_property(std::string key, int64_t &value)
 {
 	int code = mpv_get_property(m_mpv_context, key.c_str(), MPV_FORMAT_INT64, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("get_property_int64({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] get_property_int64({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -656,7 +610,7 @@ bool MpvWrapper::get_property(std::string key, double &value)
 {
 	int code = mpv_get_property(m_mpv_context, key.c_str(), MPV_FORMAT_DOUBLE, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("get_property_double({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] get_property_double({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -667,7 +621,7 @@ bool MpvWrapper::get_property(std::string key, std::string &value)
 {
 	int code = mpv_get_property(m_mpv_context, key.c_str(), MPV_FORMAT_STRING, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("get_property_string({}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] get_property_string({}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -679,7 +633,7 @@ bool MpvWrapper::set_property(std::string key, bool value)
 	int v = value ? 1 : 0;
 	int code = mpv_set_property(m_mpv_context, key.c_str(), MPV_FORMAT_FLAG, &v);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_property_flag({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_property_flag({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -690,7 +644,7 @@ bool MpvWrapper::set_property(std::string key, int64_t value)
 {
 	int code = mpv_set_property(m_mpv_context, key.c_str(), MPV_FORMAT_INT64, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_property_int64({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_property_int64({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -701,7 +655,7 @@ bool MpvWrapper::set_property(std::string key, double value)
 {
 	int code = mpv_set_property(m_mpv_context, key.c_str(), MPV_FORMAT_DOUBLE, &value);
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_property_double({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_property_double({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -712,7 +666,7 @@ bool MpvWrapper::set_property(std::string key, std::string value)
 {
 	int code = mpv_set_property_string(m_mpv_context, key.c_str(), value.c_str());
 	if (code < 0) {
-		SPDLOG_ERROR("mpv_set_property_string({}, {}, {}) error, code: {}, msg: {}\n", fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
+		SPDLOG_ERROR("[mpv {}] mpv_set_property_string({}, {}, {}) error, code: {}, msg: {}\n", m_id, fmt::ptr(m_mpv_context), key, value, code, mpv_error_string(code));
 		return false;
 	}
 	return true;
@@ -738,12 +692,12 @@ void MpvWrapper::set_container_window_visiable(bool state)
 }
 
 
-bool MpvWrapper::restart_codec_changed(struct mpv_event_log_message *msg)
+bool MpvWrapper::restart_when_codec_changed(struct mpv_event_log_message *msg)
 {
 	if (msg->log_level <= MPV_LOG_LEVEL_WARN && strstr(msg->prefix, "ffmpeg/video") != nullptr && strstr(msg->text, "data partitioning is not implemented") != nullptr) {
 		m_is_restarting.store(true);
 		stop();
-		start(m_container_wid, m_mix_cpu_gpu_use, m_video_url, m_profile, m_vo, m_hwdec, m_gpu_api, m_gpu_context, m_log_level);
+		start(m_container_wid, m_video_url, m_profile, m_vo, m_hwdec, m_gpu_api, m_gpu_context, m_log_level);
 		m_is_restarting.store(false);
 
 		return true;
@@ -852,5 +806,84 @@ void MpvWrapper::reduce_latency()
 			set_speed(m_estimated_speed);
 		}
 	}
+}
+
+
+//    mpv log level        ->   spdlog log level
+// 70 MPV_LOG_LEVEL_TRACE  -> 0 SPDLOG_LEVEL_TRACE
+// 60 MPV_LOG_LEVEL_DEBUG  -> 1 SPDLOG_LEVEL_DEBUG
+// 50 MPV_LOG_LEVEL_V      -> 2 SPDLOG_LEVEL_INFO
+// 40 MPV_LOG_LEVEL_INFO   -> 2 SPDLOG_LEVEL_INFO
+// 30 MPV_LOG_LEVEL_WARN   -> 3 SPDLOG_LEVEL_WARN
+// 20 MPV_LOG_LEVEL_ERROR  -> 4 SPDLOG_LEVEL_ERROR
+// 10 MPV_LOG_LEVEL_FATAL  -> 5 SPDLOG_LEVEL_CRITICAL
+// 0 MPV_LOG_LEVEL_NONE    -> 6 SPDLOG_LEVEL_OFF
+static std::map<enum mpv_log_level, spdlog::level::level_enum> mpv_log_level_to_spdlog_level{
+	{MPV_LOG_LEVEL_TRACE, spdlog::level::trace},
+	{MPV_LOG_LEVEL_DEBUG, spdlog::level::debug},
+	{MPV_LOG_LEVEL_V, spdlog::level::info},
+	{MPV_LOG_LEVEL_INFO, spdlog::level::info},
+	{MPV_LOG_LEVEL_WARN, spdlog::level::warn},
+	{MPV_LOG_LEVEL_ERROR, spdlog::level::err},
+	{MPV_LOG_LEVEL_FATAL, spdlog::level::critical},
+	{MPV_LOG_LEVEL_NONE, spdlog::level::off},
+};
+
+
+#define SPDLOG_MPV_MESSAGE(msg, index)                \
+	SPDLOG_LOGGER_CALL(                               \
+	spdlog::default_logger_raw(),                     \
+	mpv_log_level_to_spdlog_level[msg->log_level],    \
+	"[mpv {}] [{}] [{}] {}",                          \
+	index, msg->prefix, msg->level, msg->text         \
+)
+
+
+void MpvWrapper::poll_events(void *ptr)
+{
+	if (nullptr == ptr) {
+		return;
+	}
+
+	MpvWrapper *thiz = (MpvWrapper *)ptr;
+
+	std::ostringstream oss;
+	oss << std::this_thread::get_id() << std::endl;
+	SPDLOG_INFO("[mpv {}] poll_events begin, thread: {}", thiz->m_id, oss.str());
+
+	while (thiz != nullptr && !thiz->m_stopping && thiz->m_mpv_context != nullptr) {
+		mpv_event *event = mpv_wait_event(thiz->m_mpv_context, 16);
+		if (nullptr == event) {
+			continue;
+		}
+
+		switch (event->event_id) {
+		case MPV_EVENT_LOG_MESSAGE:
+		{
+			struct mpv_event_log_message *msg = event->data != nullptr ? (struct mpv_event_log_message *)event->data : nullptr;
+			if (nullptr == msg || nullptr == msg->prefix || nullptr == msg->text) {
+				continue;
+			}
+
+			// log message
+			SPDLOG_MPV_MESSAGE(msg, thiz->m_id);
+
+			// restart
+			if (thiz->restart_when_codec_changed(msg)) {
+				SPDLOG_INFO("[mpv {}] restart when the codec was changed\n", thiz->m_id);
+				continue;
+			}
+
+			// extract resolution
+			if (thiz->get_decoded_resolution(msg)) {
+				SPDLOG_INFO("[mpv {}] get video width ({}) and height ({})\n", thiz->m_id, thiz->m_width, thiz->m_height);
+				continue;
+			}
+		}
+		break;
+		}
+	}
+
+	SPDLOG_INFO("[mpv {}] poll_events end, thread: {}", thiz->m_id, oss.str());
 }
 

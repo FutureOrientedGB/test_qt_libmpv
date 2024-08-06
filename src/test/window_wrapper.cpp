@@ -30,7 +30,7 @@ WindowWrapper::~WindowWrapper()
 
 
 bool WindowWrapper::create_players(
-	int ways, bool mix_cpu_gpu_use, std::string video_url,
+	int ways, int gpu_ways, std::string video_url,
 	std::string profile, std::string vo, std::string hwdec,
 	std::string gpu_api, std::string gpu_context, std::string log_level
 )
@@ -123,7 +123,7 @@ bool WindowWrapper::create_players(
 		}
 	}
 
-	return m_mpv_manager.start_players(m_index_to_widget, mix_cpu_gpu_use, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level);
+	return m_mpv_manager.start_players(m_index_to_widget, gpu_ways, video_url, profile, vo, hwdec, gpu_api, gpu_context, log_level);
 }
 
 

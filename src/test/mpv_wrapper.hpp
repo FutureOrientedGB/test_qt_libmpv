@@ -21,7 +21,7 @@ public:
 
 	// start player
 	bool start(
-		int64_t container_wid, bool mix_cpu_gpu_use = false, std::string video_url = "",
+		int64_t container_wid, std::string video_url = "",
 		std::string profile = "low-latency", std::string vo = "gpu",
 		std::string hwdec = "auto", std::string gpu_api = "auto",
 		std::string gpu_context = "auto", std::string log_level = "v"
@@ -76,9 +76,6 @@ public:
 	// take screenshot from video
 	bool screenshot(std::string &path);
 
-	// poll events
-	static void pool_events(void *ptr);
-
 
 protected:
 	// wrap mpv_create to create mpv handle ctx
@@ -118,7 +115,7 @@ protected:
 	void set_container_window_visiable(bool state);
 
 	// restart when the codec was changed
-	bool restart_codec_changed(struct mpv_event_log_message *msg);
+	bool restart_when_codec_changed(struct mpv_event_log_message *msg);
 
 	// get decoded resolution
 	bool get_decoded_resolution(struct mpv_event_log_message *msg);
@@ -129,8 +126,15 @@ protected:
 	// fast speed to reduce latency
 	void reduce_latency();
 
+	// poll events
+	static void poll_events(void *ptr);
+
 
 private:
+	// id
+	uint32_t m_id;
+	// auto-incrementing index
+	static std::atomic<uint16_t> s_index;
 	// flag to break infinite loop
 	bool m_stopping;
 	// is restarting
@@ -155,8 +159,6 @@ private:
 	uint32_t m_height;
 	// player's parent window id
 	int64_t m_container_wid;
-	// mix cpu and gpu for decoding
-	bool m_mix_cpu_gpu_use;
 	// video to play
 	std::string m_video_url;
 	// mpv profile option

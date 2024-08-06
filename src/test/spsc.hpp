@@ -184,7 +184,7 @@ public:
 			if (ms > 10000) {
 				m_last_full_log_time = now;
 				SPDLOG_WARN(
-					"no space available, repeats: {}, this: {}, buffer_size({}) - input_offset({}) + output_offset({}) = {}\n",
+					"no space, n: {}, p: {}, s({}) - w({}) + o({}) = {}\n",
 					m_last_full_log_repeat_times, fmt::ptr(this), m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_space_size()
 				);
 				m_last_full_log_repeat_times = 0;
@@ -279,7 +279,7 @@ public:
 			if (ms > 10000) {
 				m_last_empty_log_time = now;
 				SPDLOG_WARN(
-					"no data available, repeats: {}, this: {}, buffer_size: {}, input_offset({}) - output_offset({}) = {}\n",
+					"no data, n: {}, p: {}, s({}) - w({}) + o({}) = {}\n",
 					m_last_empty_log_repeat_times, fmt::ptr(this), m_ring_buffer.size(), LOAD_ATOMIC_RELAXED(m_input_offset), LOAD_ATOMIC_RELAXED(m_output_offset), available_data_size()
 				);
 				m_last_empty_log_repeat_times = 0;

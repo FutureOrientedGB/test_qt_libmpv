@@ -7,8 +7,8 @@
 
 // spdlog
 #include <spdlog/spdlog.h>
-#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/pattern_formatter.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 
 // cli11
 #include <CLI/CLI.hpp>
@@ -26,7 +26,7 @@ public:
         : log_path("qt-mpv.log")
         , log_level(SPDLOG_LEVEL_INFO)
         , ways(1)
-        , gpu_ways(ways)
+        , gpu_ways(-1)
         , profile("low-latency")
         , vo("")
         , hwdec("auto")
@@ -45,7 +45,7 @@ public:
         app.add_option("--log_path", log_path, fmt::format("log path (default {})", log_path));
         app.add_option("--log_level", log_level, "log level (default spdlog::level::info)");
         app.add_option("--ways", ways, fmt::format("ways (default {})", ways));
-        app.add_option("--gpu_ways", gpu_ways, fmt::format("ways use gpu decoding, left ways use cpu decoding (default {})", gpu_ways));
+        app.add_option("--gpu_ways", gpu_ways, "ways use gpu decoding, left ways use cpu decoding(default all)");
         app.add_option("--video_url", video_url, "video file path or stream url");
         app.add_option("--profile", profile, fmt::format("mpv profile (default {})", profile));
         app.add_option("--vo", vo, "mpv vo");
@@ -57,6 +57,30 @@ public:
         app.add_option("--window_top_pos", window_top_pos, fmt::format("window left position (default {})", window_top_pos));
         app.add_option("--window_width", window_width, fmt::format("window width (default {})", window_width));
         app.add_option("--window_height", window_height, fmt::format("window height (default {})", window_height));
+    }
+
+    void print()
+    {
+        SPDLOG_INFO(
+            "\nqt-mpv\n"
+            "    --log_path={}\n"
+            "    --log_level={}\n"
+            "    --ways={}\n"
+            "    --gpu_ways={}\n"
+            "    --video_url={}\n"
+            "    --profile={}\n"
+            "    --vo={}\n"
+            "    --hwdec={}\n"
+            "    --gpu_api={}\n"
+            "    --gpu_context={}\n"
+            "    --mpv_log_level={}\n"
+            "    --window_left_pos={}\n"
+            "    --window_top_pos={}\n"
+            "    --window_width={}\n"
+            "    --window_height={}\n",
+            log_path, log_level, ways, gpu_ways, video_url, profile, vo, hwdec, gpu_api,
+            gpu_context, mpv_log_level, window_left_pos, window_top_pos, window_width, window_height
+        );
     }
 
     std::string log_path;
@@ -83,15 +107,19 @@ int main(int argc, char** argv) {
     CommandArguments args;
     args.add_options(app);
     CLI11_PARSE(app, argc, argv);
+    if (args.gpu_ways <= 0) {
+        args.gpu_ways = args.ways;
+    }
 
     // init log
-    auto file_logger = spdlog::basic_logger_mt("qt-mpv", args.log_path);
+    auto file_logger = spdlog::rotating_logger_mt("qt-mpv", args.log_path, 10 * 1024 * 1024, 3);
     auto no_eof_formatter = std::make_unique<spdlog::pattern_formatter>("[%Y-%m-%d %H:%M:%S.%e] [%l] [%s L%# P%P T%t] %v", spdlog::pattern_time_type::local, std::string(""));  // disable eol
     file_logger->set_formatter(std::move(no_eof_formatter));
     spdlog::set_default_logger(file_logger);
     spdlog::set_level((spdlog::level::level_enum)args.log_level);
     spdlog::flush_on((spdlog::level::level_enum)args.log_level);
 
+    args.print();
     if (args.video_url.empty()) {
         SPDLOG_ERROR("empty video_url not allowed\n");
         return -1;

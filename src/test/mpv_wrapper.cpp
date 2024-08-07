@@ -84,7 +84,7 @@ int open_fn(void *user_data, char *uri, mpv_stream_cb_info *info)
 }
 
 
-std::atomic<uint16_t> MpvWrapper::s_index = 0;
+std::atomic<uint16_t> MpvWrapper::s_index(0);
 
 
 MpvWrapper::MpvWrapper(uint32_t buffer_size)

@@ -69,6 +69,9 @@ set(ENV{THRIFT_CMAKE_PATH} "${VCPKG_SHARE_PATH}/thrift")
 # cli11 cmake config dir
 set(ENV{CLI11_CMAKE_PATH} "${VCPKG_SHARE_PATH}/cli11")
 
+# qt
+set(ENV{QT_DIR} "${VCPKG_DIR}/share/cmake/Qt5")
+
 
 # pkgconf bin dir
 set(ENV{PKGCONF_EXE_PATH} "${VCPKG_TOOLS_PATH}/pkgconf/pkgconf")

@@ -221,7 +221,7 @@ bool MpvWrapper::start(
 		m_last_bitrate_update_time = std::chrono::steady_clock::now();
 
 		m_container_wid = container_wid;
-		set_container_window_visiable(true);
+		set_container_window_visible(true);
 
 		return true;
 	} while (false);
@@ -263,7 +263,7 @@ void MpvWrapper::stop()
 		return;
 	}
 
-	set_container_window_visiable(false);
+	set_container_window_visible(false);
 	m_container_wid = 0;
 
 	m_video_url.clear();
@@ -673,7 +673,7 @@ bool MpvWrapper::set_property(std::string key, std::string value)
 }
 
 
-void MpvWrapper::set_container_window_visiable(bool state)
+void MpvWrapper::set_container_window_visible(bool state)
 {
 #ifdef _WIN32
 	ShowWindow((HWND)m_container_wid, state ? SW_SHOW : SW_HIDE);

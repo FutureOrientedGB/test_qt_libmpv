@@ -112,7 +112,7 @@ protected:
 	bool set_property(std::string key, std::string value);
 
 	// show/hide container window
-	void set_container_window_visiable(bool state);
+	void set_container_window_visible(bool state);
 
 	// restart when the codec was changed
 	bool restart_when_codec_changed(struct mpv_event_log_message *msg);

@@ -680,7 +680,12 @@ void MpvWrapper::set_container_window_visible(bool state)
 #endif // _WIN32
 
 #ifdef __linux__
-	Display *display = X11Info::display();
+	Display *display = XOpenDisplay(NULL);
+	if (nullptr == display) {
+		SPDLOG_ERROR("XOpenDisplay error\n");
+        return;
+    }
+
 	if (state) {
 		XMapWindow(display, m_container_wid);
 	}
@@ -688,6 +693,8 @@ void MpvWrapper::set_container_window_visible(bool state)
 		XUnmapWindow(display, m_container_wid);
 	}
 	XFlush(display);
+	
+	XCloseDisplay(display);
 #endif
 }
 

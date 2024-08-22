@@ -1,0 +1,31 @@
+{
+  "dependencies": [
+    "cli11",
+    "fmt",
+    "spdlog",
+    "libmpv",
+    "qt5-base"
+  ],
+  "overrides": [
+    {
+      "name": "cli11",
+      "version": "2.4.2"
+    },
+    {
+      "name": "fmt",
+      "version": "11.0.2"
+    },
+    {
+      "name": "spdlog",
+      "version": "1.14.1"
+    },
+    {
+      "name": "libmpv",
+      "version": "0.38.0#3"
+    },
+    {
+      "name": "qt5-base",
+      "version": "5.15.14"
+    }
+  ]
+}

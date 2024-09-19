@@ -59,14 +59,6 @@ add_executable(${PROJECT_NAME}
 set_target_properties(${PROJECT_NAME} PROPERTIES AUTOMOC ON)
 
 
-# output dir
-set_target_properties(
-    ${PROJECT_NAME}
-    PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY $ENV{OUTPUT_EXE_DIR}
-)
-
-
 # Visual Studio - Properity - C/C++ - Code Generation - Rutime Library > /MT
 if(MSVC)
 set_target_properties(

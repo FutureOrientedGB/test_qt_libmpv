@@ -31,6 +31,5 @@
 *.out
 *.app
 
-
-vcpkg/
-project/
+# project
+build/
